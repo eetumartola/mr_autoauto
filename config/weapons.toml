@@ -1,0 +1,15 @@
+[[weapons]]
+id = "player_auto"
+projectile_type = "bullet"
+bullet_speed = 42.0
+fire_rate = 5.0
+spread_degrees = 2.0
+damage = 7.0
+
+[[weapons]]
+id = "enemy_pea_shooter"
+projectile_type = "bullet"
+bullet_speed = 24.0
+fire_rate = 1.2
+spread_degrees = 0.0
+damage = 4.0

@@ -1,0 +1,7 @@
+[[enemy_types]]
+id = "grunt_walker"
+health = 24.0
+speed = 3.8
+contact_damage = 5.0
+weapon_id = "enemy_pea_shooter"
+hitbox_radius = 0.55

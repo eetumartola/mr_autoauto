@@ -1,0 +1,7 @@
+[[upgrades]]
+id = "damage_boost_common"
+target = "weapon.player_auto.damage"
+add = 1.0
+max_stacks = 5
+rarity = "common"
+label = "Sharpened Rounds"

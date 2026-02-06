@@ -4,4 +4,6 @@ If we make decisions, new approaches, or anything that would be beneficial to re
 
 There is reference implementation of the neocortex web api use for chat and voice generation using rust at `reference/voice_api_example.txt`. Sadly there is a 2s latency, but we'll work with it.
 
+When a source file starts to get much larger than 1000 lines, it should be considered for splitting up.
+
 Run tests/clippy after extensive changes

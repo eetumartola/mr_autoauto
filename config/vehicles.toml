@@ -1,0 +1,7 @@
+[[vehicles]]
+id = "starter_car"
+health = 100.0
+acceleration = 24.0
+brake_strength = 18.0
+air_pitch_torque = 7.0
+default_weapon_id = "player_auto"

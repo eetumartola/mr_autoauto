@@ -182,7 +182,7 @@ environment = "ice"
 
 **Tasks**
 - [done] A1. Bevy app scaffold (states: `Boot -> Loading -> InRun -> Pause -> Results`).
-- [not started] A2. TOML loader + schema structs; validate references (enemy IDs, weapon IDs, env IDs).
+- [done] A2. TOML loader + schema structs; validate references (enemy IDs, weapon IDs, env IDs).
 - [not started] A3. Hot-reload (optional but high value): re-read TOML on keypress.
 - [not started] A4. Basic asset registry (sprites, placeholder polygons/boxes, audio placeholders).
 - [not started] A5. Minimal debug overlay (FPS, distance, active segment, enemy count).
@@ -369,6 +369,7 @@ environment = "ice"
 - Rust toolchain pinning for Bevy 0.17 compatibility: `rustc/cargo 1.88.0`.
 - `bevy_gaussian_splatting v6.0` currently requires nightly Rust when compiled; keep it feature-gated (`gaussian_splats`) and disabled for now.
 - Long-term splat strategy: use a vendored/patch-crate version of `bevy_gaussian_splatting v6.0.0` without the nightly-only `#![feature(lazy_type_alias)]` gate, so builds stay on stable toolchain.
+- A2 implementation detail: `config/*.toml` is now loaded/merged at startup with fail-fast validation for cross-file IDs (environment, weapon, enemy, vehicle, spawner).
 - Physics direction for later epics: bevy_rapier2d.
 - AI commentary in early milestones is stub-first; real Neocortex integration is a dedicated later task.
 - Neocortex request flow to use later: /api/v2/chat then /api/v2/audio/generate.

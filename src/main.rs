@@ -1,6 +1,8 @@
+mod config;
 mod states;
 
 use bevy::prelude::*;
+use config::ConfigPlugin;
 use states::{GameState, GameStatePlugin};
 
 fn main() {
@@ -13,6 +15,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(ConfigPlugin)
         .init_state::<GameState>()
         .add_plugins(GameStatePlugin)
         .run();

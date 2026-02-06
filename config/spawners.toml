@@ -1,0 +1,7 @@
+[[spawners]]
+id = "starter_wave"
+mode = "distance"
+spawn_enemy_ids = ["grunt_walker"]
+start_distance = 30.0
+interval_seconds = 2.0
+max_alive = 5

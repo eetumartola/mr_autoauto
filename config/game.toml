@@ -1,0 +1,5 @@
+[app]
+fixed_timestep_hz = 60.0
+starting_environment = "normal"
+default_vehicle = "starter_car"
+debug_overlay = true

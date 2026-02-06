@@ -1,0 +1,11 @@
+[[segment_sequence]]
+id = "museum_hall_01"
+length = 120.0
+environment = "normal"
+spawn_set = "starter_wave"
+
+[[segment_sequence]]
+id = "garage_alley_01"
+length = 100.0
+environment = "normal"
+spawn_set = "starter_wave"
