@@ -15,7 +15,8 @@ pub struct ConfigPlugin;
 
 impl Plugin for ConfigPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_game_config);
+        app.add_systems(Startup, load_game_config)
+            .add_systems(Update, reload_game_config_hotkey);
     }
 }
 
@@ -24,15 +25,44 @@ fn load_game_config(mut commands: Commands) {
         panic!("failed to load configuration from `{CONFIG_DIR}`: {error}");
     });
 
+    log_config_summary("Loaded", &config);
+    info!("Press F5 to hot-reload config files from `{CONFIG_DIR}`.");
+
+    commands.insert_resource(config);
+}
+
+fn reload_game_config_hotkey(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    game_config: Option<ResMut<GameConfig>>,
+) {
+    if !keyboard.just_pressed(KeyCode::F5) {
+        return;
+    }
+
+    let Some(mut current_config) = game_config else {
+        warn!("Config hot-reload requested, but `GameConfig` resource is not initialized yet.");
+        return;
+    };
+
+    match GameConfig::load_from_dir(Path::new(CONFIG_DIR)) {
+        Ok(new_config) => {
+            *current_config = new_config;
+            log_config_summary("Hot-reloaded", &current_config);
+        }
+        Err(error) => {
+            error!("Config hot-reload failed; keeping previous config: {error}");
+        }
+    }
+}
+
+fn log_config_summary(prefix: &str, config: &GameConfig) {
     info!(
-        "Loaded config: {} segments, {} environments, {} enemies, {} weapons.",
+        "{prefix} config: {} segments, {} environments, {} enemies, {} weapons.",
         config.segments.segment_sequence.len(),
         config.environments_by_id.len(),
         config.enemy_types_by_id.len(),
         config.weapons_by_id.len()
     );
-
-    commands.insert_resource(config);
 }
 
 #[derive(Resource, Debug, Clone)]
