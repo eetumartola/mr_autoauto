@@ -1,8 +1,11 @@
 use crate::config::GameConfig;
-use crate::gameplay::enemies::{Enemy, EnemyTypeId};
+use crate::gameplay::enemies::{
+    enemy_hit_flash_duration_seconds, Enemy, EnemyHealth, EnemyHitFlash, EnemyHitbox,
+};
 use crate::gameplay::vehicle::PlayerVehicle;
 use crate::states::GameState;
 use bevy::prelude::*;
+use std::collections::HashSet;
 use std::f32::consts::{PI, TAU};
 
 const TURRET_MOUNT_OFFSET_LOCAL: Vec3 = Vec3::new(0.35, 1.05, 2.5);
@@ -18,6 +21,15 @@ const MISSILE_LENGTH_M: f32 = 0.82;
 const MISSILE_THICKNESS_M: f32 = 0.18;
 const MAX_BURST_SHOTS_PER_FRAME: u32 = 12;
 const MIN_BURST_INTERVAL_S: f64 = 1.0 / 240.0;
+const BULLET_TRAIL_SEGMENT_COUNT: usize = 7;
+const MISSILE_TRAIL_SEGMENT_COUNT: usize = 8;
+const BULLET_TRAIL_SEGMENT_LENGTH_M: f32 = 0.18;
+const MISSILE_TRAIL_SEGMENT_LENGTH_M: f32 = 0.24;
+const IMPACT_FX_SIZE_M: Vec2 = Vec2::new(0.52, 0.52);
+const IMPACT_FX_LIFETIME_S: f32 = 0.15;
+const EXPLOSION_FX_SIZE_M: Vec2 = Vec2::new(1.45, 1.45);
+const EXPLOSION_FX_LIFETIME_S: f32 = 0.28;
+const FX_Z: f32 = 4.4;
 
 pub struct CombatGameplayPlugin;
 
@@ -37,6 +49,8 @@ impl Plugin for CombatGameplayPlugin {
                     fire_turret_projectiles,
                     sync_turret_targeting_visuals,
                     simulate_player_projectiles,
+                    resolve_player_projectile_enemy_hits,
+                    update_fade_out_fx,
                 )
                     .chain()
                     .run_if(in_state(GameState::InRun))
@@ -59,6 +73,7 @@ struct TurretConeBoundaryVisual {
 #[derive(Component, Debug, Clone, Copy)]
 struct PlayerProjectile {
     kind: PlayerProjectileKind,
+    damage: f32,
     velocity_mps: Vec2,
     drag: f32,
     remaining_lifetime_s: f32,
@@ -71,6 +86,13 @@ struct PlayerProjectile {
 enum PlayerProjectileKind {
     Bullet,
     Missile,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct FadeOutFx {
+    remaining_s: f32,
+    total_s: f32,
+    initial_alpha: f32,
 }
 
 #[derive(Resource, Debug, Clone)]
@@ -192,7 +214,7 @@ fn spawn_turret_visuals(
 fn update_turret_targeting_state(
     config: Res<GameConfig>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
-    enemy_query: Query<(Entity, &Transform, &EnemyTypeId), With<Enemy>>,
+    enemy_query: Query<(Entity, &Transform, &EnemyHealth), With<Enemy>>,
     mut targeting: ResMut<TurretTargetingState>,
 ) {
     let Ok(player_transform) = player_query.single() else {
@@ -216,7 +238,7 @@ fn update_turret_targeting_state(
 
     let mut best_candidate: Option<TargetCandidate> = None;
 
-    for (entity, enemy_transform, enemy_type_id) in &enemy_query {
+    for (entity, enemy_transform, enemy_health) in &enemy_query {
         let to_enemy_world = enemy_transform.translation.truncate() - origin_world;
         let distance_m = to_enemy_world.length();
 
@@ -230,11 +252,7 @@ fn update_turret_targeting_state(
             continue;
         }
 
-        let enemy_strength = config
-            .enemy_types_by_id
-            .get(&enemy_type_id.0)
-            .map(|enemy_type| enemy_type.health)
-            .unwrap_or_default();
+        let enemy_strength = enemy_health.current.max(0.0);
 
         let candidate = TargetCandidate {
             entity,
@@ -348,12 +366,8 @@ fn fire_turret_projectiles(
     if let Some(secondary_weapon_id) = vehicle_config.secondary_weapon_id.as_deref() {
         if now >= fire_state.next_missile_fire_time_s {
             if let Some(secondary_weapon) = config.weapons_by_id.get(secondary_weapon_id) {
-                let missile_spread_half_angle = secondary_weapon.spread_degrees.to_radians() * 0.5;
-                let missile_spread_angle =
-                    next_signed_unit_random(&mut fire_state.rng_state) * missile_spread_half_angle;
-                let missile_direction_local = (Mat2::from_angle(missile_spread_angle)
-                    * base_direction_local)
-                    .normalize_or_zero();
+                let missile_direction_local =
+                    Vec2::from_angle(targeting.cone_half_angle_rad).normalize_or_zero();
                 let missile_direction_world =
                     (player_rotation * missile_direction_local).normalize_or_zero();
 
@@ -461,9 +475,126 @@ fn simulate_player_projectiles(
             transform.rotation = Quat::from_rotation_z(angle);
         }
 
+        let ground_y = terrain_height_at_x(&config, transform.translation.x);
+        if transform.translation.y <= ground_y {
+            let impact_position = Vec2::new(transform.translation.x, ground_y);
+            spawn_impact_fx(&mut commands, impact_position, projectile.kind);
+            if projectile.kind == PlayerProjectileKind::Missile {
+                spawn_explosion_fx(&mut commands, impact_position);
+            }
+            projectile.remaining_lifetime_s = -1.0;
+            commands.entity(entity).despawn();
+            continue;
+        }
+
         projectile.remaining_lifetime_s -= dt;
 
         if projectile.remaining_lifetime_s <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn resolve_player_projectile_enemy_hits(
+    mut commands: Commands,
+    projectile_query: Query<(Entity, &Transform, &PlayerProjectile)>,
+    mut enemy_query: Query<(Entity, &Transform, &EnemyHitbox, &mut EnemyHealth), With<Enemy>>,
+) {
+    let projectile_snapshots: Vec<(Entity, Vec2, f32, PlayerProjectileKind)> = projectile_query
+        .iter()
+        .filter(|(_, _, projectile)| projectile.remaining_lifetime_s > 0.0)
+        .map(|(entity, transform, projectile)| {
+            (
+                entity,
+                transform.translation.truncate(),
+                projectile.damage,
+                projectile.kind,
+            )
+        })
+        .collect();
+
+    if projectile_snapshots.is_empty() {
+        return;
+    }
+
+    let mut consumed_projectiles = HashSet::new();
+    let mut dead_enemies = Vec::new();
+    let mut flashed_enemies = HashSet::new();
+    let mut impact_fx_positions = Vec::new();
+    let mut explosion_fx_positions = Vec::new();
+
+    for (enemy_entity, enemy_transform, hitbox, mut health) in &mut enemy_query {
+        if health.current <= 0.0 {
+            dead_enemies.push(enemy_entity);
+            explosion_fx_positions.push(enemy_transform.translation.truncate());
+            continue;
+        }
+
+        let enemy_position = enemy_transform.translation.truncate();
+        for (projectile_entity, projectile_position, damage, projectile_kind) in
+            &projectile_snapshots
+        {
+            if consumed_projectiles.contains(projectile_entity) {
+                continue;
+            }
+
+            let distance_sq = enemy_position.distance_squared(*projectile_position);
+            let hit_radius_sq = hitbox.radius_m * hitbox.radius_m;
+            if distance_sq > hit_radius_sq {
+                continue;
+            }
+
+            health.current -= *damage;
+            consumed_projectiles.insert(*projectile_entity);
+            impact_fx_positions.push((*projectile_position, *projectile_kind));
+
+            if health.current <= 0.0 {
+                dead_enemies.push(enemy_entity);
+                explosion_fx_positions.push(enemy_position);
+                break;
+            } else {
+                flashed_enemies.insert(enemy_entity);
+            }
+        }
+    }
+
+    for projectile_entity in consumed_projectiles {
+        commands.entity(projectile_entity).despawn();
+    }
+
+    for enemy_entity in flashed_enemies {
+        commands.entity(enemy_entity).insert(EnemyHitFlash {
+            remaining_s: enemy_hit_flash_duration_seconds(),
+        });
+    }
+
+    for (position, projectile_kind) in impact_fx_positions {
+        spawn_impact_fx(&mut commands, position, projectile_kind);
+    }
+
+    for position in explosion_fx_positions {
+        spawn_explosion_fx(&mut commands, position);
+    }
+
+    for enemy_entity in dead_enemies {
+        commands.entity(enemy_entity).despawn();
+    }
+}
+
+fn update_fade_out_fx(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut fx_query: Query<(Entity, &mut FadeOutFx, &mut Sprite)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut fx, mut sprite) in &mut fx_query {
+        fx.remaining_s -= dt;
+        let t = (fx.remaining_s / fx.total_s).clamp(0.0, 1.0);
+        let mut color = sprite.color;
+        color.set_alpha(fx.initial_alpha * t);
+        sprite.color = color;
+
+        if fx.remaining_s <= 0.0 {
             commands.entity(entity).despawn();
         }
     }
@@ -544,22 +675,111 @@ fn spawn_player_projectile(
     let projectile_center = muzzle_world + (shot_direction_world * (projectile_length * 0.5));
     let shot_angle_world = shot_direction_world.y.atan2(shot_direction_world.x);
 
+    let projectile_entity = commands
+        .spawn((
+            Name::new("PlayerProjectile"),
+            PlayerProjectile {
+                kind: projectile_kind,
+                damage: weapon.damage,
+                velocity_mps: shot_direction_world * weapon.bullet_speed,
+                drag: weapon.projectile_drag,
+                remaining_lifetime_s: weapon.projectile_lifetime_seconds,
+                homing_turn_rate_rad_s: weapon.homing_turn_rate_degrees.to_radians(),
+                gravity_scale: weapon.missile_gravity_scale,
+                target_entity,
+            },
+            Sprite::from_color(
+                projectile_color,
+                Vec2::new(projectile_length, projectile_thickness),
+            ),
+            Transform::from_xyz(projectile_center.x, projectile_center.y, PROJECTILE_Z)
+                .with_rotation(Quat::from_rotation_z(shot_angle_world)),
+        ))
+        .id();
+
+    commands.entity(projectile_entity).with_children(|parent| {
+        let (segment_count, segment_length_m) = match projectile_kind {
+            PlayerProjectileKind::Bullet => {
+                (BULLET_TRAIL_SEGMENT_COUNT, BULLET_TRAIL_SEGMENT_LENGTH_M)
+            }
+            PlayerProjectileKind::Missile => {
+                (MISSILE_TRAIL_SEGMENT_COUNT, MISSILE_TRAIL_SEGMENT_LENGTH_M)
+            }
+        };
+        let segment_thickness_m = projectile_thickness * 0.72;
+        let base = projectile_color.to_srgba();
+        let head_alpha = base.alpha * 0.78;
+
+        for index in 0..segment_count {
+            let fade = 1.0 - (index as f32 / segment_count as f32);
+            let alpha = (head_alpha * fade.powf(1.25)).max(0.04);
+            let segment_color = Color::srgba(base.red, base.green, base.blue, alpha);
+            let center_x =
+                -((projectile_length + segment_length_m) * 0.5) - (index as f32 * segment_length_m);
+
+            parent.spawn((
+                Name::new("ProjectileTrailSegment"),
+                Sprite::from_color(
+                    segment_color,
+                    Vec2::new(segment_length_m + 0.01, segment_thickness_m),
+                ),
+                Transform::from_xyz(center_x, 0.0, -0.01 - (index as f32 * 0.001)),
+            ));
+        }
+    });
+}
+
+fn spawn_impact_fx(commands: &mut Commands, world_position: Vec2, kind: PlayerProjectileKind) {
+    let color = match kind {
+        PlayerProjectileKind::Bullet => Color::srgba(1.0, 0.96, 0.82, 0.88),
+        PlayerProjectileKind::Missile => Color::srgba(1.0, 0.74, 0.34, 0.9),
+    };
+    spawn_fade_out_fx(
+        commands,
+        "ProjectileImpactFx",
+        world_position,
+        IMPACT_FX_SIZE_M,
+        color,
+        IMPACT_FX_LIFETIME_S,
+    );
+}
+
+fn spawn_explosion_fx(commands: &mut Commands, world_position: Vec2) {
+    spawn_fade_out_fx(
+        commands,
+        "EnemyExplosionFx",
+        world_position,
+        EXPLOSION_FX_SIZE_M,
+        Color::srgba(1.0, 0.58, 0.22, 0.94),
+        EXPLOSION_FX_LIFETIME_S,
+    );
+}
+
+fn spawn_fade_out_fx(
+    commands: &mut Commands,
+    name: &'static str,
+    world_position: Vec2,
+    size: Vec2,
+    color: Color,
+    lifetime_s: f32,
+) {
+    let initial_alpha = color.to_srgba().alpha;
     commands.spawn((
-        Name::new("PlayerProjectile"),
-        PlayerProjectile {
-            kind: projectile_kind,
-            velocity_mps: shot_direction_world * weapon.bullet_speed,
-            drag: weapon.projectile_drag,
-            remaining_lifetime_s: weapon.projectile_lifetime_seconds,
-            homing_turn_rate_rad_s: weapon.homing_turn_rate_degrees.to_radians(),
-            gravity_scale: weapon.missile_gravity_scale,
-            target_entity,
+        Name::new(name),
+        FadeOutFx {
+            remaining_s: lifetime_s,
+            total_s: lifetime_s.max(0.001),
+            initial_alpha,
         },
-        Sprite::from_color(
-            projectile_color,
-            Vec2::new(projectile_length, projectile_thickness),
-        ),
-        Transform::from_xyz(projectile_center.x, projectile_center.y, PROJECTILE_Z)
-            .with_rotation(Quat::from_rotation_z(shot_angle_world)),
+        Sprite::from_color(color, size),
+        Transform::from_xyz(world_position.x, world_position.y, FX_Z),
     ));
+}
+
+fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
+    let terrain = &config.game.terrain;
+    terrain.base_height
+        + (x * terrain.ramp_slope)
+        + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
+        + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude
 }

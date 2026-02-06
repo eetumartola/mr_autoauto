@@ -26,6 +26,12 @@ const WHEELIE_ANGLE_THRESHOLD_DEG: f32 = 20.0;
 const WHEELIE_MIN_SPEED_MPS: f32 = 2.0;
 const CRASH_LANDING_SPEED_THRESHOLD_MPS: f32 = 9.0;
 const CRASH_LANDING_ANGLE_THRESHOLD_DEG: f32 = 50.0;
+const LANDING_DAMAGE_PER_MPS_OVER_THRESHOLD: f32 = 2.4;
+const PLAYER_HP_BAR_OFFSET_Y_M: f32 = 1.55;
+const PLAYER_HP_BAR_BG_WIDTH_M: f32 = 3.3;
+const PLAYER_HP_BAR_BG_HEIGHT_M: f32 = 0.26;
+const PLAYER_HP_BAR_FILL_HEIGHT_M: f32 = 0.16;
+const PLAYER_HP_BAR_Z_M: f32 = 0.9;
 
 pub struct VehicleGameplayPlugin;
 
@@ -51,6 +57,7 @@ impl Plugin for VehicleGameplayPlugin {
                     update_ground_checker_tiles,
                     apply_vehicle_kinematics,
                     update_stunt_metrics,
+                    update_player_health_bar,
                     update_vehicle_telemetry,
                     camera_follow_vehicle,
                 )
@@ -74,6 +81,12 @@ fn configure_camera_units(mut camera_query: Query<&mut Projection, With<Camera2d
 #[derive(Component)]
 pub struct PlayerVehicle;
 
+#[derive(Component, Debug, Clone, Copy)]
+pub struct PlayerHealth {
+    pub current: f32,
+    pub max: f32,
+}
+
 #[derive(Component)]
 struct GroundVisual;
 
@@ -88,6 +101,14 @@ struct GroundCheckerTile {
 #[derive(Component)]
 struct GroundRidgeTile {
     world_x: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct PlayerHpBarBackground;
+
+#[derive(Component, Debug, Clone, Copy)]
+struct PlayerHpBarFill {
+    max_width_m: f32,
 }
 
 #[derive(Component, Debug, Clone)]
@@ -184,25 +205,59 @@ fn spawn_vehicle_scene(
     existing_background: Query<Entity, With<BackgroundVisual>>,
 ) {
     if existing_player.is_empty() {
-        commands.spawn((
-            Name::new("PlayerVehicle"),
-            PlayerVehicle,
-            VehicleKinematics {
-                velocity: Vec2::ZERO,
-                angular_velocity: 0.0,
-            },
-            GroundContact {
-                grounded: true,
-                just_landed: false,
-                landing_impact_speed_mps: 0.0,
-            },
-            Sprite::from_color(Color::srgb(0.93, 0.34, 0.24), PLAYER_SIZE),
-            Transform::from_xyz(
-                0.0,
-                terrain_height_at_x(&config, 0.0) + (PLAYER_SIZE.y * 0.5) + START_HEIGHT_OFFSET,
-                10.0,
-            ),
-        ));
+        let Some(vehicle) = config.vehicles_by_id.get(&config.game.app.default_vehicle) else {
+            return;
+        };
+
+        let player_entity = commands
+            .spawn((
+                Name::new("PlayerVehicle"),
+                PlayerVehicle,
+                PlayerHealth {
+                    current: vehicle.health,
+                    max: vehicle.health,
+                },
+                VehicleKinematics {
+                    velocity: Vec2::ZERO,
+                    angular_velocity: 0.0,
+                },
+                GroundContact {
+                    grounded: true,
+                    just_landed: false,
+                    landing_impact_speed_mps: 0.0,
+                },
+                Sprite::from_color(Color::srgb(0.93, 0.34, 0.24), PLAYER_SIZE),
+                Transform::from_xyz(
+                    0.0,
+                    terrain_height_at_x(&config, 0.0) + (PLAYER_SIZE.y * 0.5) + START_HEIGHT_OFFSET,
+                    10.0,
+                ),
+            ))
+            .id();
+
+        commands.entity(player_entity).with_children(|parent| {
+            parent.spawn((
+                Name::new("PlayerHpBarBackground"),
+                PlayerHpBarBackground,
+                Sprite::from_color(
+                    Color::srgba(0.06, 0.08, 0.10, 0.85),
+                    Vec2::new(PLAYER_HP_BAR_BG_WIDTH_M, PLAYER_HP_BAR_BG_HEIGHT_M),
+                ),
+                Transform::from_xyz(0.0, PLAYER_HP_BAR_OFFSET_Y_M, PLAYER_HP_BAR_Z_M),
+            ));
+
+            parent.spawn((
+                Name::new("PlayerHpBarFill"),
+                PlayerHpBarFill {
+                    max_width_m: PLAYER_HP_BAR_BG_WIDTH_M - 0.04,
+                },
+                Sprite::from_color(
+                    Color::srgba(0.14, 0.88, 0.25, 0.94),
+                    Vec2::new(PLAYER_HP_BAR_BG_WIDTH_M - 0.04, PLAYER_HP_BAR_FILL_HEIGHT_M),
+                ),
+                Transform::from_xyz(0.0, PLAYER_HP_BAR_OFFSET_Y_M, PLAYER_HP_BAR_Z_M + 0.01),
+            ));
+        });
     }
 
     if existing_ground.is_empty() {
@@ -403,11 +458,17 @@ fn apply_vehicle_kinematics(
     config: Res<GameConfig>,
     input_state: Res<VehicleInputState>,
     mut player_query: Query<
-        (&mut Transform, &mut VehicleKinematics, &mut GroundContact),
+        (
+            &mut Transform,
+            &mut VehicleKinematics,
+            &mut GroundContact,
+            &mut PlayerHealth,
+        ),
         With<PlayerVehicle>,
     >,
 ) {
-    let Ok((mut transform, mut kinematics, mut contact)) = player_query.single_mut() else {
+    let Ok((mut transform, mut kinematics, mut contact, mut health)) = player_query.single_mut()
+    else {
         return;
     };
     let was_grounded = contact.grounded;
@@ -474,6 +535,12 @@ fn apply_vehicle_kinematics(
             if !was_grounded {
                 contact.just_landed = true;
                 contact.landing_impact_speed_mps = -kinematics.velocity.y;
+                let impact_over_threshold =
+                    (contact.landing_impact_speed_mps - CRASH_LANDING_SPEED_THRESHOLD_MPS).max(0.0);
+                if impact_over_threshold > 0.0 {
+                    let damage = impact_over_threshold * LANDING_DAMAGE_PER_MPS_OVER_THRESHOLD;
+                    health.current = (health.current - damage).max(0.0);
+                }
             }
             kinematics.velocity.y = 0.0;
         }
@@ -486,6 +553,25 @@ fn apply_vehicle_kinematics(
         transform.rotation = Quat::from_rotation_z(settled_z);
     } else {
         contact.grounded = false;
+    }
+}
+
+fn update_player_health_bar(
+    player_query: Query<&PlayerHealth, With<PlayerVehicle>>,
+    mut hp_fill_query: Query<(&PlayerHpBarFill, &mut Transform, &mut Sprite)>,
+) {
+    let Ok(player_health) = player_query.single() else {
+        return;
+    };
+
+    let health_fraction = (player_health.current / player_health.max).clamp(0.0, 1.0);
+    for (bar_fill, mut transform, mut sprite) in &mut hp_fill_query {
+        transform.scale.x = health_fraction.max(0.001);
+        transform.translation.x = -((1.0 - health_fraction) * bar_fill.max_width_m * 0.5);
+
+        let red = 0.92 - (0.78 * health_fraction);
+        let green = 0.20 + (0.67 * health_fraction);
+        sprite.color = Color::srgba(red, green, 0.20, 0.96);
     }
 }
 

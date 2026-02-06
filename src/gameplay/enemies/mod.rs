@@ -10,6 +10,12 @@ const ENEMY_SPAWN_SPACING_M: f32 = 16.0;
 const ENEMY_DESPAWN_BEHIND_M: f32 = 48.0;
 const ENEMY_DESPAWN_AHEAD_M: f32 = 220.0;
 const GROUND_FOLLOW_SNAP_RATE: f32 = 14.0;
+const ENEMY_HP_BAR_OFFSET_Y_M: f32 = 1.2;
+const ENEMY_HP_BAR_BG_WIDTH_M: f32 = 2.0;
+const ENEMY_HP_BAR_BG_HEIGHT_M: f32 = 0.26;
+const ENEMY_HP_BAR_FILL_HEIGHT_M: f32 = 0.16;
+const ENEMY_HP_BAR_Z_M: f32 = 0.9;
+const ENEMY_HIT_FLASH_DURATION_S: f32 = 0.12;
 
 pub struct EnemyGameplayPlugin;
 
@@ -22,6 +28,8 @@ impl Plugin for EnemyGameplayPlugin {
                 (
                     spawn_bootstrap_enemies,
                     update_enemy_behaviors,
+                    update_enemy_hit_flash_effects,
+                    update_enemy_health_bars,
                     despawn_far_enemies,
                     rearm_bootstrap_when_empty,
                 )
@@ -42,6 +50,31 @@ pub struct EnemyHitbox {
 
 #[derive(Component, Debug, Clone)]
 pub struct EnemyTypeId(pub String);
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyHealth {
+    pub current: f32,
+    pub max: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+pub struct EnemyHitFlash {
+    pub remaining_s: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct EnemyBaseColor(pub Color);
+
+#[derive(Component, Debug, Clone, Copy)]
+struct EnemyHpBarBackground {
+    owner: Entity,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct EnemyHpBarFill {
+    owner: Entity,
+    max_width_m: f32,
+}
 
 #[derive(Component, Debug, Clone, Copy)]
 struct EnemyMotion {
@@ -123,6 +156,7 @@ fn spawn_enemy_instance(
 ) {
     let behavior_kind = behavior_kind_from_config(enemy_cfg.behavior.as_str());
     let body_size = body_size_for_behavior(behavior_kind, enemy_cfg.hitbox_radius);
+    let body_color = color_for_behavior(behavior_kind);
     let ground_y = terrain_height_at_x(config, spawn_x) + enemy_cfg.hitbox_radius.max(0.15);
     let phase_offset = (sequence as f32 * 0.37).rem_euclid(1.0) * TAU;
 
@@ -138,29 +172,65 @@ fn spawn_enemy_instance(
         _ => ground_y,
     };
 
-    commands.spawn((
-        Name::new(format!("Enemy/{}", enemy_cfg.id)),
-        Enemy,
-        EnemyDebugMarker,
-        EnemyTypeId(enemy_cfg.id.clone()),
-        EnemyHitbox {
-            radius_m: enemy_cfg.hitbox_radius,
-        },
-        EnemyMotion {
-            base_speed_mps: enemy_cfg.speed,
-        },
-        EnemyBehavior {
-            kind: behavior_kind,
-            base_altitude_m: base_altitude,
-            hover_amplitude_m: enemy_cfg.hover_amplitude.max(0.5),
-            hover_frequency_hz: enemy_cfg.hover_frequency.max(0.4),
-            charge_speed_multiplier: enemy_cfg.charge_speed_multiplier.max(1.2),
-            phase_offset_rad: phase_offset,
-            elapsed_s: 0.0,
-        },
-        Sprite::from_color(color_for_behavior(behavior_kind), body_size),
-        Transform::from_xyz(spawn_x, start_y, 8.0),
-    ));
+    let enemy_entity = commands
+        .spawn((
+            Name::new(format!("Enemy/{}", enemy_cfg.id)),
+            Enemy,
+            EnemyDebugMarker,
+            EnemyTypeId(enemy_cfg.id.clone()),
+            EnemyBaseColor(body_color),
+            EnemyHealth {
+                current: enemy_cfg.health,
+                max: enemy_cfg.health,
+            },
+            EnemyHitbox {
+                radius_m: enemy_cfg.hitbox_radius,
+            },
+            EnemyMotion {
+                base_speed_mps: enemy_cfg.speed,
+            },
+            EnemyBehavior {
+                kind: behavior_kind,
+                base_altitude_m: base_altitude,
+                hover_amplitude_m: enemy_cfg.hover_amplitude.max(0.5),
+                hover_frequency_hz: enemy_cfg.hover_frequency.max(0.4),
+                charge_speed_multiplier: enemy_cfg.charge_speed_multiplier.max(1.2),
+                phase_offset_rad: phase_offset,
+                elapsed_s: 0.0,
+            },
+            Sprite::from_color(body_color, body_size),
+            Transform::from_xyz(spawn_x, start_y, 8.0),
+        ))
+        .id();
+
+    commands.entity(enemy_entity).with_children(|parent| {
+        parent.spawn((
+            Name::new("EnemyHpBarBackground"),
+            EnemyHpBarBackground {
+                owner: enemy_entity,
+            },
+            Sprite::from_color(
+                Color::srgba(0.06, 0.08, 0.10, 0.85),
+                Vec2::new(ENEMY_HP_BAR_BG_WIDTH_M, ENEMY_HP_BAR_BG_HEIGHT_M),
+            ),
+            Transform::from_xyz(0.0, ENEMY_HP_BAR_OFFSET_Y_M, ENEMY_HP_BAR_Z_M),
+            Visibility::Hidden,
+        ));
+
+        parent.spawn((
+            Name::new("EnemyHpBarFill"),
+            EnemyHpBarFill {
+                owner: enemy_entity,
+                max_width_m: ENEMY_HP_BAR_BG_WIDTH_M - 0.04,
+            },
+            Sprite::from_color(
+                Color::srgba(0.12, 0.86, 0.22, 0.92),
+                Vec2::new(ENEMY_HP_BAR_BG_WIDTH_M - 0.04, ENEMY_HP_BAR_FILL_HEIGHT_M),
+            ),
+            Transform::from_xyz(0.0, ENEMY_HP_BAR_OFFSET_Y_M, ENEMY_HP_BAR_Z_M + 0.01),
+            Visibility::Hidden,
+        ));
+    });
 }
 
 #[allow(clippy::type_complexity)]
@@ -270,6 +340,83 @@ fn rearm_bootstrap_when_empty(
     }
 }
 
+fn update_enemy_hit_flash_effects(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut enemy_query: Query<
+        (
+            Entity,
+            &EnemyBaseColor,
+            &mut Sprite,
+            Option<&mut EnemyHitFlash>,
+        ),
+        With<Enemy>,
+    >,
+) {
+    let dt = time.delta_secs();
+
+    for (entity, base_color, mut sprite, hit_flash) in &mut enemy_query {
+        if let Some(mut flash) = hit_flash {
+            flash.remaining_s -= dt;
+            sprite.color = Color::srgba(1.0, 1.0, 1.0, 1.0);
+
+            if flash.remaining_s <= 0.0 {
+                commands.entity(entity).remove::<EnemyHitFlash>();
+                sprite.color = base_color.0;
+            }
+        } else {
+            sprite.color = base_color.0;
+        }
+    }
+}
+
+fn update_enemy_health_bars(
+    enemy_health_query: Query<&EnemyHealth, With<Enemy>>,
+    mut hp_bg_query: Query<(&EnemyHpBarBackground, &mut Visibility)>,
+    mut hp_fill_query: Query<
+        (
+            &EnemyHpBarFill,
+            &mut Transform,
+            &mut Sprite,
+            &mut Visibility,
+        ),
+        Without<EnemyHpBarBackground>,
+    >,
+) {
+    for (bar_bg, mut visibility) in &mut hp_bg_query {
+        let Ok(enemy_health) = enemy_health_query.get(bar_bg.owner) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+        let health_fraction = (enemy_health.current / enemy_health.max).clamp(0.0, 1.0);
+        *visibility = if health_fraction < 0.999 {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+
+    for (bar_fill, mut transform, mut sprite, mut visibility) in &mut hp_fill_query {
+        let Ok(enemy_health) = enemy_health_query.get(bar_fill.owner) else {
+            *visibility = Visibility::Hidden;
+            continue;
+        };
+
+        let health_fraction = (enemy_health.current / enemy_health.max).clamp(0.0, 1.0);
+        if health_fraction < 0.999 {
+            *visibility = Visibility::Inherited;
+            transform.scale.x = health_fraction.max(0.001);
+            transform.translation.x = -((1.0 - health_fraction) * bar_fill.max_width_m * 0.5);
+
+            let red = 0.92 - (0.78 * health_fraction);
+            let green = 0.18 + (0.66 * health_fraction);
+            sprite.color = Color::srgba(red, green, 0.18, 0.94);
+        } else {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
 fn body_size_for_behavior(kind: EnemyBehaviorKind, hitbox_radius: f32) -> Vec2 {
     let r = hitbox_radius.max(0.15);
     match kind {
@@ -287,6 +434,10 @@ fn color_for_behavior(kind: EnemyBehaviorKind) -> Color {
         EnemyBehaviorKind::Turret => Color::srgb(0.81, 0.54, 0.84),
         EnemyBehaviorKind::Charger => Color::srgb(0.90, 0.41, 0.41),
     }
+}
+
+pub fn enemy_hit_flash_duration_seconds() -> f32 {
+    ENEMY_HIT_FLASH_DURATION_S
 }
 
 fn behavior_kind_from_config(raw: &str) -> EnemyBehaviorKind {

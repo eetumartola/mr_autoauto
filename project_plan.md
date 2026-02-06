@@ -231,9 +231,9 @@ environment = "ice"
 - [done] C3. Projectile simulation:
   - bullet: straight + optional drag
   - missile: ballistic + optional homing (bounded turn rate)
-- [not started] C4. Collision & damage:
+- [done] C4. Collision & damage:
   - simple circle/box overlap (2D), friendly-fire rules, hitstop optional.
-- [not started] C5. Effects v0:
+- [done] C5. Effects v0:
   - tracer sprite, impact sprite, enemy hit flash, simple explosion quad
 - [not started] C6. Audio SFX placeholders (gun, hit, explosion) with volume ducking under narration.
 
@@ -415,6 +415,13 @@ environment = "ice"
 - C3 implementation detail: projectile simulation now supports config-driven bullet drag plus missile ballistic gravity and optional bounded homing turn-rate, with projectile type selected by `weapons.toml::projectile_type`.
 - C3 stability fix: projectile simulation queries now use explicit `Without` filters between enemy and projectile transform access to avoid Bevy ECS B0001 conflicts at runtime.
 - Missile channel behavior update: player now has a separate optional secondary missile weapon slot (`vehicles.toml::secondary_weapon_id`) with independent cadence (`missile_fire_interval_seconds`, default 2.0s), so bullets and missiles auto-fire in parallel when a target is currently acquired; launched missiles continue homing by physics even if the target later leaves the cone.
+- Missile launch vector rule: secondary missiles now always launch along the upper cone boundary direction (not the current blue target ray) before homing behavior takes over.
+- C4 implementation detail: player projectiles now resolve 2D overlap against enemy hit radii, apply config-driven projectile damage to live enemy health, despawn consumed projectiles, and despawn enemies at zero HP (player shots do not damage player entities).
+- C5 implementation detail: combat feedback now includes projectile tracer sprites, hit impact sprites, enemy hit flash, and simple explosion quads; wounded enemies now show an HP bar above the unit (hidden at full health, visible once damaged).
+- C5 tracer readability update: projectile trails now render as attached solid multi-segment lines with per-segment alpha falloff (instead of time-spawned detached tracer pieces).
+- Projectile-ground interaction update: bullets and missiles now collide with terrain and despawn on ground impact, spawning impact FX (missiles also trigger explosion FX).
+- Player survivability update: player now has HP state and an in-world HP bar above the vehicle; crash-impact landings apply HP damage so the bar reflects vehicle health changes.
+- Scope decision: keep C6 audio/SFX placeholder wiring deferred for later iteration.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
 - Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.
