@@ -1,5 +1,6 @@
 use crate::commentary_stub::CommentaryStubState;
 use crate::config::GameConfig;
+use crate::gameplay::vehicle::VehicleTelemetry;
 use crate::states::GameState;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
@@ -35,7 +36,8 @@ pub struct EnemyDebugMarker;
 #[derive(Resource, Debug, Clone)]
 pub struct DebugRunStats {
     pub distance_m: f32,
-    pub virtual_speed_mps: f32,
+    pub speed_mps: f32,
+    pub grounded: bool,
     pub active_segment_id: String,
 }
 
@@ -43,21 +45,16 @@ impl Default for DebugRunStats {
     fn default() -> Self {
         Self {
             distance_m: 0.0,
-            virtual_speed_mps: 12.0,
+            speed_mps: 0.0,
+            grounded: true,
             active_segment_id: "n/a".to_string(),
         }
     }
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Default)]
 struct KeybindOverlayState {
     visible: bool,
-}
-
-impl Default for KeybindOverlayState {
-    fn default() -> Self {
-        Self { visible: true }
-    }
 }
 
 fn spawn_debug_overlay(
@@ -124,14 +121,26 @@ fn spawn_debug_overlay(
 
 fn reset_run_stats(mut run_stats: ResMut<DebugRunStats>) {
     run_stats.distance_m = 0.0;
+    run_stats.speed_mps = 0.0;
+    run_stats.grounded = true;
 }
 
 fn update_run_stats(
     time: Res<Time>,
     config: Res<GameConfig>,
+    vehicle: Option<Res<VehicleTelemetry>>,
     mut run_stats: ResMut<DebugRunStats>,
 ) {
-    run_stats.distance_m += run_stats.virtual_speed_mps * time.delta_secs();
+    match vehicle {
+        Some(vehicle) => {
+            run_stats.distance_m = vehicle.distance_m;
+            run_stats.speed_mps = vehicle.speed_mps;
+            run_stats.grounded = vehicle.grounded;
+        }
+        None => {
+            run_stats.distance_m += run_stats.speed_mps * time.delta_secs();
+        }
+    }
 
     let mut cursor = 0.0_f32;
     let mut active_segment = config
@@ -183,8 +192,10 @@ fn update_debug_overlay_text(
     };
 
     *text = Text::new(format!(
-        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nLast Commentary: {last_line}\nHotkeys: H help | F5 reload config | J big jump | K kill | C crash",
+        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m\nSpeed: {speed:>6.1} m/s\nGrounded: {grounded}\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nLast Commentary: {last_line}\nHotkeys: H help | F5 reload config | J big jump | K kill | C crash",
         distance = run_stats.distance_m,
+        speed = run_stats.speed_mps,
+        grounded = if run_stats.grounded { "yes" } else { "no" },
         segment = run_stats.active_segment_id,
     ));
 }
@@ -234,8 +245,8 @@ fn keybind_overlay_text() -> &'static str {
     "Keybinds\n\
 H - Toggle this panel\n\
 F5 - Hot-reload config\n\
-A / Right - Accelerate (planned)\n\
-D / Left - Brake / reverse (planned)\n\
+D / Right - Accelerate\n\
+A / Left - Brake / reverse\n\
 J - Queue BigJump commentary event\n\
 K - Queue Kill commentary event\n\
 C - Queue Crash commentary event\n\

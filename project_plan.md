@@ -200,12 +200,12 @@ environment = "ice"
 **Goal:** two-button driving feels "good enough" quickly; physics is stable.
 
 **Tasks**
-- [not started] B1. Input mapping (keyboard + gamepad optional; touch overlay for web optional).
-- [not started] B2. Vehicle kinematics v0:
+- [done] B1. Input mapping (keyboard + gamepad optional; touch overlay for web optional).
+- [done] B2. Vehicle kinematics v0:
   - integrate velocity, gravity, clamp, basic ground collision with flat ground
   - grounded vs airborne state
-- [not started] B3. In-air rotation controls (CCW/CW based on accel/brake).
-- [not started] B4. Camera follow (look-ahead based on speed; fixed z).
+- [done] B3. In-air rotation controls (CCW/CW based on accel/brake).
+- [done] B4. Camera follow (look-ahead based on speed; fixed z).
 - [not started] B5. Terrain v1 placeholder: simple height function (sine/ramps) from config.
 - [not started] B6. Stunt metrics:
   - airtime, wheelie timer, flip detection, max speed, crash detection.
@@ -382,8 +382,11 @@ environment = "ice"
 - A3 implementation detail: press `F5` in-game to hot-reload all `config/*.toml`; invalid reloads are rejected and previous in-memory config stays active.
 - A4 implementation detail: `assets.toml` now defines sprite/model/splat/audio catalogs; model entries include hierarchy metadata (`root_node`, `wheel_nodes`, optional `turret_node`) for vehicle-style compositions.
 - A5 implementation detail: debug HUD now shows FPS, distance, active segment, enemy count, and commentary queue status.
-- Debug overlay visibility detail: overlay text now uses Bevy default UI font fallback (no bundled font required), and `H` toggles a full keybind help panel.
+- Debug overlay visibility detail: overlay text now uses Bevy default UI font fallback (no bundled font required), keybind help is hidden by default, and `H` toggles it.
 - A6 implementation detail: commentary stub queue is active with key-driven events (`J` big jump, `K` kill, `C` crash), zero network dependency.
+- B1-B4 implementation detail: Epic B now has keyboard input mapping (`D`/`Right` accelerate, `A`/`Left` brake), visible placeholder player+ground, flat-ground kinematics with grounded/airborne states, in-air pitch control, and speed-based camera follow.
+- Visual motion detail: temporary checkerboard pattern was added to both background and ground to make movement readability obvious during placeholder art phase.
+- Vehicle feel tuning detail: increased linear speed scaling/caps and replaced frame-based ground friction with time-based damping to produce clearer movement and stronger inertia.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
 - Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.

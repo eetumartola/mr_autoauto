@@ -2,6 +2,7 @@ mod assets;
 mod commentary_stub;
 mod config;
 mod debug;
+mod gameplay;
 mod states;
 
 use assets::AssetRegistryPlugin;
@@ -10,6 +11,7 @@ use bevy::prelude::*;
 use commentary_stub::CommentaryStubPlugin;
 use config::ConfigPlugin;
 use debug::DebugOverlayPlugin;
+use gameplay::GameplayPlugin;
 use states::{GameState, GameStatePlugin};
 
 fn main() {
@@ -27,6 +29,7 @@ fn main() {
         .add_plugins(AssetRegistryPlugin)
         .add_plugins(DebugOverlayPlugin)
         .add_plugins(CommentaryStubPlugin)
+        .add_plugins(GameplayPlugin)
         .init_state::<GameState>()
         .add_plugins(GameStatePlugin)
         .run();
