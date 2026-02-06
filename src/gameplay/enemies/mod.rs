@@ -1,6 +1,6 @@
-use crate::config::{EnemyTypeConfig, GameConfig};
+use crate::config::{EnemyTypeConfig, GameConfig, WeaponConfig};
 use crate::debug::EnemyDebugMarker;
-use crate::gameplay::vehicle::PlayerVehicle;
+use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
 use bevy::prelude::*;
 use std::f32::consts::TAU;
@@ -16,6 +16,19 @@ const ENEMY_HP_BAR_BG_HEIGHT_M: f32 = 0.26;
 const ENEMY_HP_BAR_FILL_HEIGHT_M: f32 = 0.16;
 const ENEMY_HP_BAR_Z_M: f32 = 0.9;
 const ENEMY_HIT_FLASH_DURATION_S: f32 = 0.12;
+const ENEMY_ATTACK_RANGE_M: f32 = 38.0;
+const ENEMY_FLIER_ARC_ANGLE_RAD: f32 = 0.28;
+const ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD: f32 = 0.16;
+const ENEMY_PROJECTILE_Z_M: f32 = 2.0;
+const ENEMY_BULLET_LENGTH_M: f32 = 0.42;
+const ENEMY_BULLET_THICKNESS_M: f32 = 0.10;
+const ENEMY_MISSILE_LENGTH_M: f32 = 0.72;
+const ENEMY_MISSILE_THICKNESS_M: f32 = 0.16;
+const ENEMY_PROJECTILE_ARC_GRAVITY_SCALE: f32 = 0.6;
+const PLAYER_CONTACT_HIT_RADIUS_M: f32 = 1.45;
+const PLAYER_PROJECTILE_HIT_RADIUS_M: f32 = 1.25;
+const MIN_ENEMY_FIRE_RATE_HZ: f32 = 0.05;
+const MIN_ENEMY_FIRE_COOLDOWN_S: f32 = 0.12;
 
 pub struct EnemyGameplayPlugin;
 
@@ -28,6 +41,10 @@ impl Plugin for EnemyGameplayPlugin {
                 (
                     spawn_bootstrap_enemies,
                     update_enemy_behaviors,
+                    fire_enemy_projectiles,
+                    simulate_enemy_projectiles,
+                    resolve_enemy_projectile_hits_player,
+                    apply_enemy_contact_damage_to_player,
                     update_enemy_hit_flash_effects,
                     update_enemy_health_bars,
                     despawn_far_enemies,
@@ -90,6 +107,27 @@ struct EnemyBehavior {
     charge_speed_multiplier: f32,
     phase_offset_rad: f32,
     elapsed_s: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct EnemyAttackState {
+    cooldown_s: f32,
+    rng_state: u64,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
+struct EnemyProjectile {
+    damage: f32,
+    velocity_mps: Vec2,
+    drag: f32,
+    gravity_scale: f32,
+    remaining_lifetime_s: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnemyProjectileKind {
+    Bullet,
+    Missile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,6 +235,10 @@ fn spawn_enemy_instance(
                 charge_speed_multiplier: enemy_cfg.charge_speed_multiplier.max(1.2),
                 phase_offset_rad: phase_offset,
                 elapsed_s: 0.0,
+            },
+            EnemyAttackState {
+                cooldown_s: 0.35 + ((sequence as f32 * 0.17).rem_euclid(0.8)),
+                rng_state: 0xD8E5_3A1C_9F2B_4D11 ^ sequence as u64 ^ (enemy_cfg.id.len() as u64),
             },
             Sprite::from_color(body_color, body_size),
             Transform::from_xyz(spawn_x, start_y, 8.0),
@@ -313,6 +355,200 @@ fn update_enemy_behaviors(
     }
 }
 
+#[allow(clippy::type_complexity)]
+fn fire_enemy_projectiles(
+    mut commands: Commands,
+    time: Res<Time>,
+    config: Res<GameConfig>,
+    player_query: Query<&Transform, With<PlayerVehicle>>,
+    mut enemy_query: Query<
+        (
+            &Transform,
+            &EnemyBehavior,
+            &EnemyTypeId,
+            &EnemyHitbox,
+            &mut EnemyAttackState,
+        ),
+        With<Enemy>,
+    >,
+) {
+    let Ok(player_transform) = player_query.single() else {
+        return;
+    };
+    let player_position = player_transform.translation.truncate();
+    let dt = time.delta_secs();
+
+    for (enemy_transform, behavior, enemy_type_id, hitbox, mut attack_state) in &mut enemy_query {
+        attack_state.cooldown_s -= dt;
+        if attack_state.cooldown_s > 0.0 {
+            continue;
+        }
+
+        let Some(enemy_type) = config.enemy_types_by_id.get(&enemy_type_id.0) else {
+            continue;
+        };
+        let Some(weapon) = config.weapons_by_id.get(&enemy_type.weapon_id) else {
+            continue;
+        };
+
+        let enemy_position = enemy_transform.translation.truncate();
+        let to_player = player_position - enemy_position;
+        let distance_to_player_m = to_player.length();
+        if distance_to_player_m <= 0.001 || distance_to_player_m > ENEMY_ATTACK_RANGE_M {
+            attack_state.cooldown_s =
+                (1.0 / weapon.fire_rate.max(MIN_ENEMY_FIRE_RATE_HZ)).max(MIN_ENEMY_FIRE_COOLDOWN_S);
+            continue;
+        }
+
+        let aim_direction = to_player.normalize_or_zero();
+        let muzzle_forward = hitbox.radius_m + weapon.muzzle_offset_x.max(0.0);
+        let muzzle_world = enemy_position
+            + (aim_direction * muzzle_forward)
+            + Vec2::new(0.0, weapon.muzzle_offset_y);
+
+        let (pattern_offsets_rad, pattern_count) = shot_pattern_for_behavior(behavior.kind);
+        let spread_half_angle_rad = weapon.spread_degrees.to_radians() * 0.5;
+        let burst_count = weapon.burst_count.max(1);
+
+        for _ in 0..burst_count {
+            for pattern_offset in pattern_offsets_rad.iter().take(pattern_count) {
+                let behavior_offset = if behavior.kind == EnemyBehaviorKind::Flier {
+                    pattern_offset * aim_direction.x.signum().clamp(-1.0, 1.0)
+                } else {
+                    *pattern_offset
+                };
+                let random_spread =
+                    next_signed_unit_random(&mut attack_state.rng_state) * spread_half_angle_rad;
+                let shot_angle =
+                    aim_direction.y.atan2(aim_direction.x) + behavior_offset + random_spread;
+                let shot_direction_world = Vec2::from_angle(shot_angle).normalize_or_zero();
+
+                if shot_direction_world.length_squared() <= f32::EPSILON {
+                    continue;
+                }
+
+                spawn_enemy_projectile(
+                    &mut commands,
+                    weapon,
+                    behavior.kind,
+                    muzzle_world,
+                    shot_direction_world,
+                );
+            }
+        }
+
+        let fire_cooldown_s =
+            (1.0 / weapon.fire_rate.max(MIN_ENEMY_FIRE_RATE_HZ)).max(MIN_ENEMY_FIRE_COOLDOWN_S);
+        let burst_extension_s =
+            weapon.burst_interval_seconds.max(0.0) * burst_count.saturating_sub(1) as f32;
+        attack_state.cooldown_s = fire_cooldown_s + burst_extension_s;
+    }
+}
+
+fn simulate_enemy_projectiles(
+    mut commands: Commands,
+    time: Res<Time>,
+    config: Res<GameConfig>,
+    mut projectile_query: Query<(Entity, &mut Transform, &mut EnemyProjectile)>,
+) {
+    let Some(environment) = config
+        .environments_by_id
+        .get(&config.game.app.starting_environment)
+    else {
+        return;
+    };
+
+    let dt = time.delta_secs();
+    for (entity, mut transform, mut projectile) in &mut projectile_query {
+        if projectile.gravity_scale > 0.0 {
+            projectile.velocity_mps.y -= environment.gravity * projectile.gravity_scale * dt;
+        }
+
+        let drag_damping = f32::exp(-(projectile.drag.max(0.0) * dt));
+        projectile.velocity_mps *= drag_damping;
+        transform.translation += (projectile.velocity_mps * dt).extend(0.0);
+
+        if projectile.velocity_mps.length_squared() > f32::EPSILON {
+            let angle = projectile.velocity_mps.y.atan2(projectile.velocity_mps.x);
+            transform.rotation = Quat::from_rotation_z(angle);
+        }
+
+        let ground_y = terrain_height_at_x(&config, transform.translation.x);
+        if transform.translation.y <= ground_y {
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        projectile.remaining_lifetime_s -= dt;
+        if projectile.remaining_lifetime_s <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn resolve_enemy_projectile_hits_player(
+    mut commands: Commands,
+    projectile_query: Query<(Entity, &Transform, &EnemyProjectile)>,
+    mut player_query: Query<(&Transform, &mut PlayerHealth), With<PlayerVehicle>>,
+) {
+    let Ok((player_transform, mut player_health)) = player_query.single_mut() else {
+        return;
+    };
+    let player_position = player_transform.translation.truncate();
+    let hit_radius_sq = PLAYER_PROJECTILE_HIT_RADIUS_M * PLAYER_PROJECTILE_HIT_RADIUS_M;
+
+    let mut total_damage = 0.0;
+    let mut consumed_projectiles = Vec::new();
+    for (projectile_entity, transform, projectile) in &projectile_query {
+        let projectile_position = transform.translation.truncate();
+        if projectile_position.distance_squared(player_position) <= hit_radius_sq {
+            total_damage += projectile.damage.max(0.0);
+            consumed_projectiles.push(projectile_entity);
+        }
+    }
+
+    if total_damage > 0.0 {
+        player_health.current = (player_health.current - total_damage).max(0.0);
+    }
+
+    for projectile_entity in consumed_projectiles {
+        commands.entity(projectile_entity).despawn();
+    }
+}
+
+fn apply_enemy_contact_damage_to_player(
+    time: Res<Time>,
+    config: Res<GameConfig>,
+    mut player_query: Query<(&Transform, &mut PlayerHealth), With<PlayerVehicle>>,
+    enemy_query: Query<(&Transform, &EnemyHitbox, &EnemyTypeId), With<Enemy>>,
+) {
+    let Ok((player_transform, mut player_health)) = player_query.single_mut() else {
+        return;
+    };
+    let player_position = player_transform.translation.truncate();
+    let dt = time.delta_secs();
+
+    let mut total_contact_damage = 0.0;
+    for (enemy_transform, enemy_hitbox, enemy_type_id) in &enemy_query {
+        let Some(enemy_type) = config.enemy_types_by_id.get(&enemy_type_id.0) else {
+            continue;
+        };
+
+        let combined_radius = PLAYER_CONTACT_HIT_RADIUS_M + enemy_hitbox.radius_m;
+        let distance_sq = enemy_transform
+            .translation
+            .truncate()
+            .distance_squared(player_position);
+        if distance_sq <= combined_radius * combined_radius {
+            total_contact_damage += enemy_type.contact_damage.max(0.0) * dt;
+        }
+    }
+
+    if total_contact_damage > 0.0 {
+        player_health.current = (player_health.current - total_contact_damage).max(0.0);
+    }
+}
+
 fn despawn_far_enemies(
     mut commands: Commands,
     player_query: Query<&Transform, With<PlayerVehicle>>,
@@ -338,6 +574,84 @@ fn rearm_bootstrap_when_empty(
     if bootstrap.seeded && enemy_query.is_empty() {
         bootstrap.seeded = false;
     }
+}
+
+fn shot_pattern_for_behavior(kind: EnemyBehaviorKind) -> ([f32; 3], usize) {
+    match kind {
+        EnemyBehaviorKind::Walker | EnemyBehaviorKind::Turret => ([0.0, 0.0, 0.0], 1),
+        EnemyBehaviorKind::Flier => ([ENEMY_FLIER_ARC_ANGLE_RAD, 0.0, 0.0], 1),
+        EnemyBehaviorKind::Charger => (
+            [
+                -ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD,
+                0.0,
+                ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD,
+            ],
+            3,
+        ),
+    }
+}
+
+fn spawn_enemy_projectile(
+    commands: &mut Commands,
+    weapon: &WeaponConfig,
+    behavior_kind: EnemyBehaviorKind,
+    muzzle_world: Vec2,
+    shot_direction_world: Vec2,
+) {
+    let projectile_kind = match weapon.projectile_type.as_str() {
+        "missile" => EnemyProjectileKind::Missile,
+        _ => EnemyProjectileKind::Bullet,
+    };
+    let (length_m, thickness_m, color) = match projectile_kind {
+        EnemyProjectileKind::Bullet => (
+            ENEMY_BULLET_LENGTH_M,
+            ENEMY_BULLET_THICKNESS_M,
+            Color::srgba(1.0, 0.64, 0.26, 0.88),
+        ),
+        EnemyProjectileKind::Missile => (
+            ENEMY_MISSILE_LENGTH_M,
+            ENEMY_MISSILE_THICKNESS_M,
+            Color::srgba(1.0, 0.48, 0.22, 0.92),
+        ),
+    };
+
+    let gravity_scale = match projectile_kind {
+        EnemyProjectileKind::Missile => weapon.missile_gravity_scale.max(0.0),
+        EnemyProjectileKind::Bullet => {
+            if behavior_kind == EnemyBehaviorKind::Flier {
+                ENEMY_PROJECTILE_ARC_GRAVITY_SCALE
+            } else {
+                0.0
+            }
+        }
+    };
+
+    let projectile_center = muzzle_world + (shot_direction_world * (length_m * 0.5));
+    let shot_angle = shot_direction_world.y.atan2(shot_direction_world.x);
+
+    commands.spawn((
+        Name::new("EnemyProjectile"),
+        EnemyProjectile {
+            damage: weapon.damage.max(0.0),
+            velocity_mps: shot_direction_world * weapon.bullet_speed.max(0.1),
+            drag: weapon.projectile_drag.max(0.0),
+            gravity_scale,
+            remaining_lifetime_s: weapon.projectile_lifetime_seconds.max(0.05),
+        },
+        Sprite::from_color(color, Vec2::new(length_m, thickness_m)),
+        Transform::from_xyz(
+            projectile_center.x,
+            projectile_center.y,
+            ENEMY_PROJECTILE_Z_M,
+        )
+        .with_rotation(Quat::from_rotation_z(shot_angle)),
+    ));
+}
+
+fn next_signed_unit_random(seed: &mut u64) -> f32 {
+    *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+    let value = ((*seed >> 32) as u32) as f32 / u32::MAX as f32;
+    (value * 2.0) - 1.0
 }
 
 fn update_enemy_hit_flash_effects(

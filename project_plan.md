@@ -249,7 +249,7 @@ environment = "ice"
 - [done] D1. Enemy "quad" renderer + hitbox.
 - [done] D2. Enemy behaviors v0 (config-driven):
   - Walker (ground), Flier (sine hover), Turret (stationary shooter), Charger.
-- [not started] D3. Enemy shooting patterns (simple): aimed shots, arcs, spreads.
+- [done] D3. Enemy shooting patterns (simple): aimed shots, arcs, spreads.
 - [not started] D4. Spawner system:
   - distance-based triggers, timed spawns, max alive, cooldown.
 - [not started] D5. Difficulty scaling:
@@ -421,6 +421,8 @@ environment = "ice"
 - C5 tracer readability update: projectile trails now render as attached solid multi-segment lines with per-segment alpha falloff (instead of time-spawned detached tracer pieces).
 - Projectile-ground interaction update: bullets and missiles now collide with terrain and despawn on ground impact, spawning impact FX (missiles also trigger explosion FX).
 - Player survivability update: player now has HP state and an in-world HP bar above the vehicle; crash-impact landings apply HP damage so the bar reflects vehicle health changes.
+- D3 implementation detail: enemies now fire back via behavior-driven patterns (walker/turret aimed shots, flier arcing shots, charger spreads), using their configured weapon IDs and weapon stats from TOML.
+- Enemy threat model update: player HP now also takes damage from enemy projectiles and from direct enemy overlap/contact (continuous damage while colliding, scaled by each enemy type's `contact_damage`).
 - Scope decision: keep C6 audio/SFX placeholder wiring deferred for later iteration.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
