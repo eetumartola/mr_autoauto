@@ -428,8 +428,9 @@ fn apply_vehicle_kinematics(
     let throttle = if input_state.accelerate { 1.0 } else { 0.0 };
     let brake = if input_state.brake { 1.0 } else { 0.0 };
 
-    let drive_accel = vehicle.acceleration * vehicle.linear_speed_scale;
-    let brake_accel = vehicle.brake_strength * vehicle.linear_speed_scale;
+    let drive_accel = (vehicle.acceleration * vehicle.linear_speed_scale) / vehicle.linear_inertia;
+    let brake_accel =
+        (vehicle.brake_strength * vehicle.linear_speed_scale) / vehicle.linear_inertia;
     kinematics.velocity.x += (throttle * drive_accel - brake * brake_accel) * dt;
 
     let damping = if contact.grounded {
@@ -444,7 +445,8 @@ fn apply_vehicle_kinematics(
     kinematics.velocity.y -= environment.gravity * vehicle.gravity_scale * dt;
 
     if !contact.grounded {
-        kinematics.angular_velocity += (throttle - brake) * vehicle.air_pitch_torque * dt;
+        kinematics.angular_velocity +=
+            ((throttle - brake) * vehicle.air_pitch_torque / vehicle.rotational_inertia) * dt;
         kinematics.angular_velocity = kinematics
             .angular_velocity
             .clamp(-MAX_ANGULAR_SPEED, MAX_ANGULAR_SPEED);

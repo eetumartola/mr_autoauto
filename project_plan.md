@@ -161,11 +161,13 @@ environment = "ice"
 
 ### 5.10 `config/commentator.toml`
 - thresholds for calling out: airtime, wheelie time, flip count, speed tier
+- thresholds should include magnitude buckets (for example big vs huge jump) so game emits precise factual event descriptors.
 - rate limiting: min seconds between voice lines, priority rules
 - two commentator profiles (character IDs/style/voice settings + subtitle colors)
 - round-robin scheduler rules (which commentator speaks next)
 - template prompts + "style" settings
 - prompt context should include what the other commentator said last time
+- game-side event summaries should stay dry/factual ("player made a huge jump", "player is near death"); stylistic color comes from the LLM layer.
 - fallback lines (non-AI) if API fails
 
 ---
@@ -244,8 +246,8 @@ environment = "ice"
 **Goal:** enemies spawn from data and create pressure.
 
 **Tasks**
-- [not started] D1. Enemy "quad" renderer + hitbox.
-- [not started] D2. Enemy behaviors v0 (config-driven):
+- [done] D1. Enemy "quad" renderer + hitbox.
+- [done] D2. Enemy behaviors v0 (config-driven):
   - Walker (ground), Flier (sine hover), Turret (stationary shooter), Charger.
 - [not started] D3. Enemy shooting patterns (simple): aimed shots, arcs, spreads.
 - [not started] D4. Spawner system:
@@ -400,6 +402,9 @@ environment = "ice"
 - B6 implementation detail: stunt metrics now track airtime (current/best), wheelie time (current/best), flip count, max speed, and crash count from hard/awkward landings; metrics are shown in debug HUD.
 - Vehicle mass/jump tuning detail: gravity scale is now vehicle-configurable in `vehicles.toml`; starter car gravity scale was reduced to make jumps possible.
 - Epic C targeting readability requirement: always show blue target laser and green target-cone boundaries; cone defaults to 60 degrees and is configurable/upgradable.
+- Commentary event-style decision: game systems should emit dry factual descriptors and thresholds (including big/huge buckets); narrator style/tone belongs to LLM output, not gameplay event text.
+- Vehicle handling tuning detail: starter car now uses mass/gravity at 70% of prior value, rotational inertia +20%, and linear inertia at 80% of prior value via new vehicle config knobs.
+- D1-D2 implementation detail: enemies are now visible quads with hitbox data and config-driven movement behaviors (walker/flier/turret/charger), enabling meaningful turret-targeting work before C1.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
 - Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.

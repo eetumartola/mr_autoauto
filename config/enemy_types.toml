@@ -1,7 +1,38 @@
 [[enemy_types]]
 id = "grunt_walker"
+behavior = "walker"
 health = 24.0
-speed = 3.8
+speed = 4.2
 contact_damage = 5.0
 weapon_id = "enemy_pea_shooter"
 hitbox_radius = 0.55
+
+[[enemy_types]]
+id = "drone_flier"
+behavior = "flier"
+health = 18.0
+speed = 3.4
+contact_damage = 4.0
+weapon_id = "enemy_pea_shooter"
+hitbox_radius = 0.45
+hover_amplitude = 1.8
+hover_frequency = 1.35
+
+[[enemy_types]]
+id = "roadside_turret"
+behavior = "turret"
+health = 36.0
+speed = 0.5
+contact_damage = 8.0
+weapon_id = "enemy_pea_shooter"
+hitbox_radius = 0.65
+
+[[enemy_types]]
+id = "charger_buggy"
+behavior = "charger"
+health = 30.0
+speed = 3.6
+contact_damage = 10.0
+weapon_id = "enemy_pea_shooter"
+hitbox_radius = 0.60
+charge_speed_multiplier = 2.2

@@ -189,6 +189,42 @@ impl GameConfig {
                     enemy.weapon_id
                 )));
             }
+            if enemy.health <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "enemy_types.toml::enemy_types[{index}].health must be > 0"
+                )));
+            }
+            if enemy.speed <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "enemy_types.toml::enemy_types[{index}].speed must be > 0"
+                )));
+            }
+            if enemy.hitbox_radius <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "enemy_types.toml::enemy_types[{index}].hitbox_radius must be > 0"
+                )));
+            }
+            if !matches!(
+                enemy.behavior.as_str(),
+                "walker" | "flier" | "turret" | "charger"
+            ) {
+                return Err(ConfigError::Validation(format!(
+                    "enemy_types.toml::enemy_types[{index}].behavior `{}` is unsupported (expected walker/flier/turret/charger)",
+                    enemy.behavior
+                )));
+            }
+            if enemy.behavior == "flier"
+                && (enemy.hover_amplitude <= 0.0 || enemy.hover_frequency <= 0.0)
+            {
+                return Err(ConfigError::Validation(format!(
+                    "enemy_types.toml::enemy_types[{index}] flier behavior requires hover_amplitude > 0 and hover_frequency > 0"
+                )));
+            }
+            if enemy.behavior == "charger" && enemy.charge_speed_multiplier <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "enemy_types.toml::enemy_types[{index}] charger behavior requires charge_speed_multiplier > 0"
+                )));
+            }
         }
 
         for (index, spawner) in self.spawners.spawners.iter().enumerate() {
@@ -241,6 +277,16 @@ impl GameConfig {
             if vehicle.air_env_drag_factor < 0.0 {
                 return Err(ConfigError::Validation(format!(
                     "vehicles.toml::vehicles[{index}].air_env_drag_factor must be >= 0"
+                )));
+            }
+            if vehicle.linear_inertia <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].linear_inertia must be > 0"
+                )));
+            }
+            if vehicle.rotational_inertia <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].rotational_inertia must be > 0"
                 )));
             }
             if vehicle.gravity_scale <= 0.0 {
@@ -469,11 +515,18 @@ pub struct EnemyTypesFile {
 #[derive(Debug, Clone, Deserialize)]
 pub struct EnemyTypeConfig {
     pub id: String,
+    pub behavior: String,
     pub health: f32,
     pub speed: f32,
     pub contact_damage: f32,
     pub weapon_id: String,
     pub hitbox_radius: f32,
+    #[serde(default)]
+    pub hover_amplitude: f32,
+    #[serde(default)]
+    pub hover_frequency: f32,
+    #[serde(default)]
+    pub charge_speed_multiplier: f32,
 }
 
 impl HasId for EnemyTypeConfig {
@@ -543,6 +596,8 @@ pub struct VehicleConfig {
     pub ground_coast_damping: f32,
     pub air_base_damping: f32,
     pub air_env_drag_factor: f32,
+    pub linear_inertia: f32,
+    pub rotational_inertia: f32,
     pub gravity_scale: f32,
     pub camera_look_ahead_factor: f32,
     pub camera_look_ahead_min: f32,
@@ -592,9 +647,15 @@ pub struct CommentaryConfig {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CommentaryThresholds {
     pub airtime_big_jump: f32,
+    #[serde(default)]
+    pub airtime_huge_jump: f32,
     pub wheelie_long: f32,
     pub flip_count: u32,
     pub speed_tier_1: f32,
+    #[serde(default)]
+    pub speed_tier_2: f32,
+    #[serde(default)]
+    pub near_death_health_fraction: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -719,11 +780,15 @@ mod tests {
             enemy_types: EnemyTypesFile {
                 enemy_types: vec![EnemyTypeConfig {
                     id: "grunt".to_string(),
+                    behavior: "walker".to_string(),
                     health: 10.0,
                     speed: 1.0,
                     contact_damage: 2.0,
                     weapon_id: "enemy_weapon".to_string(),
                     hitbox_radius: 0.5,
+                    hover_amplitude: 0.0,
+                    hover_frequency: 0.0,
+                    charge_speed_multiplier: 0.0,
                 }],
             },
             spawners: SpawnersFile {
@@ -770,6 +835,8 @@ mod tests {
                     ground_coast_damping: 0.22,
                     air_base_damping: 0.10,
                     air_env_drag_factor: 0.45,
+                    linear_inertia: 1.0,
+                    rotational_inertia: 1.0,
                     gravity_scale: 1.0,
                     camera_look_ahead_factor: 1.1,
                     camera_look_ahead_min: -220.0,
@@ -793,9 +860,12 @@ mod tests {
                 },
                 thresholds: CommentaryThresholds {
                     airtime_big_jump: 1.0,
+                    airtime_huge_jump: 2.0,
                     wheelie_long: 0.8,
                     flip_count: 1,
                     speed_tier_1: 12.0,
+                    speed_tier_2: 18.0,
+                    near_death_health_fraction: 0.15,
                 },
                 fallback: FallbackLines {
                     lines: vec!["Nice!".to_string()],
@@ -826,11 +896,15 @@ mod tests {
                 "grunt".to_string(),
                 EnemyTypeConfig {
                     id: "grunt".to_string(),
+                    behavior: "walker".to_string(),
                     health: 10.0,
                     speed: 1.0,
                     contact_damage: 2.0,
                     weapon_id: "enemy_weapon".to_string(),
                     hitbox_radius: 0.5,
+                    hover_amplitude: 0.0,
+                    hover_frequency: 0.0,
+                    charge_speed_multiplier: 0.0,
                 },
             )]),
             spawners_by_id: HashMap::from([(
@@ -883,6 +957,8 @@ mod tests {
                     ground_coast_damping: 0.22,
                     air_base_damping: 0.10,
                     air_env_drag_factor: 0.45,
+                    linear_inertia: 1.0,
+                    rotational_inertia: 1.0,
                     gravity_scale: 1.0,
                     camera_look_ahead_factor: 1.1,
                     camera_look_ahead_min: -220.0,

@@ -3,13 +3,18 @@ min_seconds_between_lines = 4.0
 
 [thresholds]
 airtime_big_jump = 1.4
+airtime_huge_jump = 2.6
 wheelie_long = 1.2
 flip_count = 1
 speed_tier_1 = 16.0
+speed_tier_2 = 24.0
+near_death_health_fraction = 0.15
 
 [fallback]
 lines = [
-  "That's how you open a run.",
-  "Big style points on that one.",
-  "Clean hit. Keep rolling."
+  "player made a big jump.",
+  "player is high in the air.",
+  "player destroyed an enemy.",
+  "player crashed.",
+  "player is close to death."
 ]

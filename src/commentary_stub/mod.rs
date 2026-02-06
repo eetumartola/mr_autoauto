@@ -41,7 +41,6 @@ pub struct CommentaryStubState {
     pub last_line: String,
     pub recent_events: VecDeque<String>,
     last_emit_time_seconds: f64,
-    fallback_cursor: usize,
 }
 
 impl Default for CommentaryStubState {
@@ -51,7 +50,6 @@ impl Default for CommentaryStubState {
             last_line: String::new(),
             recent_events: VecDeque::new(),
             last_emit_time_seconds: 0.0,
-            fallback_cursor: 0,
         }
     }
 }
@@ -61,7 +59,6 @@ fn reset_commentary_stub(mut state: ResMut<CommentaryStubState>) {
     state.last_line.clear();
     state.recent_events.clear();
     state.last_emit_time_seconds = 0.0;
-    state.fallback_cursor = 0;
 }
 
 fn emit_stub_events_from_input(
@@ -94,8 +91,7 @@ fn process_commentary_queue(
         return;
     }
 
-    let fallback_line = next_fallback_line(&mut state, &config);
-    let built_line = format!("[{}] {}", event.label(), fallback_line);
+    let built_line = build_dry_stub_line(&event, &config);
 
     state.last_line = built_line.clone();
     state.last_emit_time_seconds = now;
@@ -109,14 +105,22 @@ fn process_commentary_queue(
     info!("Commentary stub emitted: {built_line}");
 }
 
-fn next_fallback_line(state: &mut CommentaryStubState, config: &GameConfig) -> String {
-    if config.commentator.fallback.lines.is_empty() {
-        return "No fallback commentary line configured.".to_string();
-    }
+fn build_dry_stub_line(event: &StubGameEvent, config: &GameConfig) -> String {
+    let line = match event {
+        StubGameEvent::BigJump => {
+            if config.commentator.thresholds.airtime_huge_jump
+                > config.commentator.thresholds.airtime_big_jump
+            {
+                "player made a big jump."
+            } else {
+                "player jumped."
+            }
+        }
+        StubGameEvent::Kill => "player destroyed an enemy.",
+        StubGameEvent::Crash => "player crashed.",
+    };
 
-    let index = state.fallback_cursor % config.commentator.fallback.lines.len();
-    state.fallback_cursor = state.fallback_cursor.wrapping_add(1);
-    config.commentator.fallback.lines[index].clone()
+    line.to_string()
 }
 
 fn push_event(state: &mut CommentaryStubState, event: StubGameEvent) {
