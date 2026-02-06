@@ -1,6 +1,8 @@
 use crate::commentary_stub::CommentaryStubState;
 use crate::config::GameConfig;
-use crate::gameplay::vehicle::{VehicleStuntMetrics, VehicleTelemetry};
+use crate::gameplay::vehicle::{
+    PlayerVehicle, VehicleInputState, VehicleStuntMetrics, VehicleTelemetry,
+};
 use crate::states::GameState;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
@@ -156,11 +158,14 @@ fn update_run_stats(
     run_stats.active_segment_id = active_segment;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_debug_overlay_text(
     diagnostics: Res<DiagnosticsStore>,
     run_stats: Res<DebugRunStats>,
     enemy_query: Query<(), With<EnemyDebugMarker>>,
+    player_query: Query<&Transform, With<PlayerVehicle>>,
     commentary: Option<Res<CommentaryStubState>>,
+    input_state: Option<Res<VehicleInputState>>,
     stunts: Option<Res<VehicleStuntMetrics>>,
     mut overlay_query: Query<&mut Text, With<DebugOverlayText>>,
 ) {
@@ -174,6 +179,13 @@ fn update_debug_overlay_text(
         .unwrap_or(0.0);
 
     let enemy_count = enemy_query.iter().count();
+    let player_x = player_query
+        .single()
+        .map(|transform| transform.translation.x)
+        .unwrap_or(run_stats.distance_m);
+    let (input_accel, input_brake) = input_state
+        .map(|state| (state.accelerate, state.brake))
+        .unwrap_or((false, false));
 
     let (queue_len, last_line) = match commentary {
         Some(state) => (
@@ -202,9 +214,12 @@ fn update_debug_overlay_text(
         };
 
     *text = Text::new(format!(
-        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m\nSpeed: {speed:>6.1} m/s\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2})\nWheelie Best: {wheelie_best:>4.2}s | Flips: {flips} | Crashes: {crashes}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nLast Commentary: {last_line}\nHotkeys: H help | F5 reload config | J big jump | K kill | C crash",
+        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2})\nWheelie Best: {wheelie_best:>4.2}s | Flips: {flips} | Crashes: {crashes}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nLast Commentary: {last_line}\nHotkeys: H help | F5 reload config | J big jump | K kill | C crash",
         distance = run_stats.distance_m,
+        player_x = player_x,
         speed = run_stats.speed_mps,
+        accel = if input_accel { "yes" } else { "no" },
+        brake = if input_brake { "yes" } else { "no" },
         grounded = if run_stats.grounded { "yes" } else { "no" },
         air_cur = airtime_cur,
         air_best = airtime_best,

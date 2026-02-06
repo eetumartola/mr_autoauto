@@ -237,6 +237,65 @@ impl GameConfig {
             }
         }
 
+        for (index, weapon) in self.weapons.weapons.iter().enumerate() {
+            if !matches!(weapon.projectile_type.as_str(), "bullet" | "missile") {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].projectile_type `{}` is unsupported (expected bullet/missile)",
+                    weapon.projectile_type
+                )));
+            }
+            if weapon.bullet_speed <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].bullet_speed must be > 0"
+                )));
+            }
+            if weapon.fire_rate <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].fire_rate must be > 0"
+                )));
+            }
+            if weapon.spread_degrees < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].spread_degrees must be >= 0"
+                )));
+            }
+            if weapon.damage <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].damage must be > 0"
+                )));
+            }
+            if weapon.burst_count == 0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].burst_count must be >= 1"
+                )));
+            }
+            if weapon.burst_interval_seconds < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].burst_interval_seconds must be >= 0"
+                )));
+            }
+            if weapon.projectile_drag < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].projectile_drag must be >= 0"
+                )));
+            }
+            if weapon.projectile_lifetime_seconds <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].projectile_lifetime_seconds must be > 0"
+                )));
+            }
+            if weapon.missile_gravity_scale < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].missile_gravity_scale must be >= 0"
+                )));
+            }
+            if weapon.homing_turn_rate_degrees < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "weapons.toml::weapons[{index}].homing_turn_rate_degrees must be >= 0"
+                )));
+            }
+        }
+
         for (index, vehicle) in self.vehicles.vehicles.iter().enumerate() {
             if !self.weapons_by_id.contains_key(&vehicle.default_weapon_id) {
                 return Err(ConfigError::Validation(format!(
@@ -292,6 +351,25 @@ impl GameConfig {
             if vehicle.gravity_scale <= 0.0 {
                 return Err(ConfigError::Validation(format!(
                     "vehicles.toml::vehicles[{index}].gravity_scale must be > 0"
+                )));
+            }
+            if vehicle.turret_range_m <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].turret_range_m must be > 0"
+                )));
+            }
+            if !(0.0 < vehicle.turret_cone_degrees && vehicle.turret_cone_degrees <= 180.0) {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].turret_cone_degrees must be in (0, 180]"
+                )));
+            }
+            if !matches!(
+                vehicle.turret_target_priority.as_str(),
+                "nearest" | "strongest"
+            ) {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].turret_target_priority `{}` is unsupported (expected nearest/strongest)",
+                    vehicle.turret_target_priority
                 )));
             }
             if vehicle.camera_look_ahead_max <= vehicle.camera_look_ahead_min {
@@ -569,6 +647,38 @@ pub struct WeaponConfig {
     pub fire_rate: f32,
     pub spread_degrees: f32,
     pub damage: f32,
+    #[serde(default = "default_weapon_burst_count")]
+    pub burst_count: u32,
+    #[serde(default)]
+    pub burst_interval_seconds: f32,
+    #[serde(default = "default_weapon_muzzle_offset_x")]
+    pub muzzle_offset_x: f32,
+    #[serde(default)]
+    pub muzzle_offset_y: f32,
+    #[serde(default)]
+    pub projectile_drag: f32,
+    #[serde(default = "default_projectile_lifetime_seconds")]
+    pub projectile_lifetime_seconds: f32,
+    #[serde(default = "default_missile_gravity_scale")]
+    pub missile_gravity_scale: f32,
+    #[serde(default)]
+    pub homing_turn_rate_degrees: f32,
+}
+
+fn default_weapon_burst_count() -> u32 {
+    1
+}
+
+fn default_weapon_muzzle_offset_x() -> f32 {
+    1.8
+}
+
+fn default_projectile_lifetime_seconds() -> f32 {
+    2.8
+}
+
+fn default_missile_gravity_scale() -> f32 {
+    1.0
 }
 
 impl HasId for WeaponConfig {
@@ -599,10 +709,28 @@ pub struct VehicleConfig {
     pub linear_inertia: f32,
     pub rotational_inertia: f32,
     pub gravity_scale: f32,
+    #[serde(default = "default_turret_range_m")]
+    pub turret_range_m: f32,
+    #[serde(default = "default_turret_cone_degrees")]
+    pub turret_cone_degrees: f32,
+    #[serde(default = "default_turret_target_priority")]
+    pub turret_target_priority: String,
     pub camera_look_ahead_factor: f32,
     pub camera_look_ahead_min: f32,
     pub camera_look_ahead_max: f32,
     pub default_weapon_id: String,
+}
+
+fn default_turret_range_m() -> f32 {
+    28.0
+}
+
+fn default_turret_cone_degrees() -> f32 {
+    60.0
+}
+
+fn default_turret_target_priority() -> String {
+    "nearest".to_string()
 }
 
 impl HasId for VehicleConfig {
@@ -810,6 +938,14 @@ mod tests {
                         fire_rate: 1.0,
                         spread_degrees: 0.0,
                         damage: 2.0,
+                        burst_count: 1,
+                        burst_interval_seconds: 0.0,
+                        muzzle_offset_x: 1.2,
+                        muzzle_offset_y: 0.0,
+                        projectile_drag: 0.0,
+                        projectile_lifetime_seconds: 2.8,
+                        missile_gravity_scale: 1.0,
+                        homing_turn_rate_degrees: 0.0,
                     },
                     WeaponConfig {
                         id: "player_weapon".to_string(),
@@ -818,6 +954,14 @@ mod tests {
                         fire_rate: 2.0,
                         spread_degrees: 0.0,
                         damage: 3.0,
+                        burst_count: 1,
+                        burst_interval_seconds: 0.0,
+                        muzzle_offset_x: 1.8,
+                        muzzle_offset_y: 0.1,
+                        projectile_drag: 0.0,
+                        projectile_lifetime_seconds: 2.8,
+                        missile_gravity_scale: 1.0,
+                        homing_turn_rate_degrees: 0.0,
                     },
                 ],
             },
@@ -838,6 +982,9 @@ mod tests {
                     linear_inertia: 1.0,
                     rotational_inertia: 1.0,
                     gravity_scale: 1.0,
+                    turret_range_m: 28.0,
+                    turret_cone_degrees: 60.0,
+                    turret_target_priority: "nearest".to_string(),
                     camera_look_ahead_factor: 1.1,
                     camera_look_ahead_min: -220.0,
                     camera_look_ahead_max: 420.0,
@@ -928,6 +1075,14 @@ mod tests {
                         fire_rate: 1.0,
                         spread_degrees: 0.0,
                         damage: 2.0,
+                        burst_count: 1,
+                        burst_interval_seconds: 0.0,
+                        muzzle_offset_x: 1.2,
+                        muzzle_offset_y: 0.0,
+                        projectile_drag: 0.0,
+                        projectile_lifetime_seconds: 2.8,
+                        missile_gravity_scale: 1.0,
+                        homing_turn_rate_degrees: 0.0,
                     },
                 ),
                 (
@@ -939,6 +1094,14 @@ mod tests {
                         fire_rate: 2.0,
                         spread_degrees: 0.0,
                         damage: 3.0,
+                        burst_count: 1,
+                        burst_interval_seconds: 0.0,
+                        muzzle_offset_x: 1.8,
+                        muzzle_offset_y: 0.1,
+                        projectile_drag: 0.0,
+                        projectile_lifetime_seconds: 2.8,
+                        missile_gravity_scale: 1.0,
+                        homing_turn_rate_degrees: 0.0,
                     },
                 ),
             ]),
@@ -960,6 +1123,9 @@ mod tests {
                     linear_inertia: 1.0,
                     rotational_inertia: 1.0,
                     gravity_scale: 1.0,
+                    turret_range_m: 28.0,
+                    turret_cone_degrees: 60.0,
+                    turret_target_priority: "nearest".to_string(),
                     camera_look_ahead_factor: 1.1,
                     camera_look_ahead_min: -220.0,
                     camera_look_ahead_max: 420.0,

@@ -221,14 +221,14 @@ environment = "ice"
 **Goal:** Mr Autofire-style "auto shoots and feels punchy."
 
 **Tasks**
-- [not started] C1. Turret targeting:
+- [done] C1. Turret targeting:
   - select nearest enemy within cone/range; configurable prioritization (nearest/strongest).
   - always draw a blue targeting laser to current aim point.
   - always draw two green cone boundary lines parented to car/turret transform.
   - default targeting cone width is 60 degrees and must be configurable/upgradable.
-- [not started] C2. Firing logic:
+- [done] C2. Firing logic:
   - fire rate, burst/spread, projectile spawn offsets.
-- [not started] C3. Projectile simulation:
+- [done] C3. Projectile simulation:
   - bullet: straight + optional drag
   - missile: ballistic + optional homing (bounded turn rate)
 - [not started] C4. Collision & damage:
@@ -405,6 +405,15 @@ environment = "ice"
 - Commentary event-style decision: game systems should emit dry factual descriptors and thresholds (including big/huge buckets); narrator style/tone belongs to LLM output, not gameplay event text.
 - Vehicle handling tuning detail: starter car now uses mass/gravity at 70% of prior value, rotational inertia +20%, and linear inertia at 80% of prior value via new vehicle config knobs.
 - D1-D2 implementation detail: enemies are now visible quads with hitbox data and config-driven movement behaviors (walker/flier/turret/charger), enabling meaningful turret-targeting work before C1.
+- C1 implementation detail: player now has an always-on turret targeting overlay (blue aim laser + two green cone boundary lines parented to the car), with target selection constrained by configurable `turret_range_m` and `turret_cone_degrees` and priority mode (`nearest`/`strongest`) from `vehicles.toml`.
+- Bevy ECS stability note: turret visual sync uses disjoint `Query` filters (`Without`) to avoid B0001 transform-access conflicts; non-rendering parent entities that own rendered children now include visibility (`Visibility::Inherited`) to avoid B0004 hierarchy warnings.
+- C1 visual alignment fix: laser/cone line center translations are now projected along each line direction so all targeting lines originate at the turret mount on the car instead of crossing around an offset midpoint.
+- C1 readability tweak: turret cone and aim lines now render at 30% opacity.
+- Loading polish: `assets/sprites/autoauto_logo.jpg` is now shown during `Loading` for a minimum 0.75s before entering `InRun`.
+- Loading reliability fix: enabled Bevy `jpeg` feature and made `Loading -> InRun` wait for logo load completion (or fail-fast on load failure) so the logo is visible as soon as the window is up.
+- C2 implementation detail: auto-fire now uses `weapons.toml` data for `fire_rate`, `spread_degrees`, `burst_count`, `burst_interval_seconds`, and muzzle spawn offsets (`muzzle_offset_x/y`), spawning visible placeholder projectiles from the turret.
+- C3 implementation detail: projectile simulation now supports config-driven bullet drag plus missile ballistic gravity and optional bounded homing turn-rate, with projectile type selected by `weapons.toml::projectile_type`.
+- C3 stability fix: projectile simulation queries now use explicit `Without` filters between enemy and projectile transform access to avoid Bevy ECS B0001 conflicts at runtime.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
 - Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.

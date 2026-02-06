@@ -212,6 +212,7 @@ fn spawn_vehicle_scene(
                 GroundVisual,
                 Transform::default(),
                 GlobalTransform::default(),
+                Visibility::Inherited,
             ))
             .id();
 
