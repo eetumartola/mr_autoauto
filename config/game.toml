@@ -3,3 +3,11 @@ fixed_timestep_hz = 60.0
 starting_environment = "normal"
 default_vehicle = "starter_car"
 debug_overlay = true
+
+[terrain]
+base_height = -8.5
+ramp_slope = 0.0
+wave_a_amplitude = 2.1
+wave_a_frequency = 0.200
+wave_b_amplitude = 0.9
+wave_b_frequency = 0.620

@@ -1,6 +1,6 @@
 use crate::commentary_stub::CommentaryStubState;
 use crate::config::GameConfig;
-use crate::gameplay::vehicle::VehicleTelemetry;
+use crate::gameplay::vehicle::{VehicleStuntMetrics, VehicleTelemetry};
 use crate::states::GameState;
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
@@ -143,17 +143,12 @@ fn update_run_stats(
     }
 
     let mut cursor = 0.0_f32;
-    let mut active_segment = config
-        .segments
-        .segment_sequence
-        .first()
-        .map(|segment| segment.id.clone())
-        .unwrap_or_else(|| "n/a".to_string());
+    let mut active_segment = "n/a".to_string();
 
     for segment in &config.segments.segment_sequence {
         cursor += segment.length;
+        active_segment = segment.id.clone();
         if run_stats.distance_m <= cursor {
-            active_segment = segment.id.clone();
             break;
         }
     }
@@ -166,6 +161,7 @@ fn update_debug_overlay_text(
     run_stats: Res<DebugRunStats>,
     enemy_query: Query<(), With<EnemyDebugMarker>>,
     commentary: Option<Res<CommentaryStubState>>,
+    stunts: Option<Res<VehicleStuntMetrics>>,
     mut overlay_query: Query<&mut Text, With<DebugOverlayText>>,
 ) {
     let Ok(mut text) = overlay_query.single_mut() else {
@@ -191,11 +187,32 @@ fn update_debug_overlay_text(
         None => (0, "n/a".to_string()),
     };
 
+    let (airtime_cur, airtime_best, wheelie_best, flip_count, crash_count, max_speed, last_impact) =
+        match stunts {
+            Some(stunts) => (
+                stunts.airtime_current_s,
+                stunts.airtime_best_s,
+                stunts.wheelie_best_s,
+                stunts.flip_count,
+                stunts.crash_count,
+                stunts.max_speed_mps,
+                stunts.last_landing_impact_speed_mps,
+            ),
+            None => (0.0, 0.0, 0.0, 0, 0, 0.0, 0.0),
+        };
+
     *text = Text::new(format!(
-        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m\nSpeed: {speed:>6.1} m/s\nGrounded: {grounded}\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nLast Commentary: {last_line}\nHotkeys: H help | F5 reload config | J big jump | K kill | C crash",
+        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m\nSpeed: {speed:>6.1} m/s\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2})\nWheelie Best: {wheelie_best:>4.2}s | Flips: {flips} | Crashes: {crashes}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nLast Commentary: {last_line}\nHotkeys: H help | F5 reload config | J big jump | K kill | C crash",
         distance = run_stats.distance_m,
         speed = run_stats.speed_mps,
         grounded = if run_stats.grounded { "yes" } else { "no" },
+        air_cur = airtime_cur,
+        air_best = airtime_best,
+        wheelie_best = wheelie_best,
+        flips = flip_count,
+        crashes = crash_count,
+        max_speed = max_speed,
+        impact = last_impact,
         segment = run_stats.active_segment_id,
     ));
 }

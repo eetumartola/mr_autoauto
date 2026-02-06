@@ -208,6 +208,57 @@ impl GameConfig {
                     vehicle.default_weapon_id
                 )));
             }
+            if vehicle.max_forward_speed <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].max_forward_speed must be > 0"
+                )));
+            }
+            if vehicle.max_reverse_speed <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].max_reverse_speed must be > 0"
+                )));
+            }
+            if vehicle.max_fall_speed <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].max_fall_speed must be > 0"
+                )));
+            }
+            if vehicle.linear_speed_scale <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].linear_speed_scale must be > 0"
+                )));
+            }
+            if vehicle.ground_coast_damping < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].ground_coast_damping must be >= 0"
+                )));
+            }
+            if vehicle.air_base_damping < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].air_base_damping must be >= 0"
+                )));
+            }
+            if vehicle.air_env_drag_factor < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].air_env_drag_factor must be >= 0"
+                )));
+            }
+            if vehicle.gravity_scale <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].gravity_scale must be > 0"
+                )));
+            }
+            if vehicle.camera_look_ahead_max <= vehicle.camera_look_ahead_min {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}] camera look-ahead range is invalid (max must be > min)"
+                )));
+            }
+        }
+
+        if self.game.terrain.wave_a_frequency < 0.0 || self.game.terrain.wave_b_frequency < 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::terrain wave frequencies must be >= 0".to_string(),
+            ));
         }
 
         for (index, sprite) in self.assets.sprites.iter().enumerate() {
@@ -335,6 +386,7 @@ trait HasId {
 #[derive(Debug, Clone, Deserialize)]
 pub struct GameFile {
     pub app: AppConfig,
+    pub terrain: TerrainConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -343,6 +395,16 @@ pub struct AppConfig {
     pub starting_environment: String,
     pub default_vehicle: String,
     pub debug_overlay: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TerrainConfig {
+    pub base_height: f32,
+    pub ramp_slope: f32,
+    pub wave_a_amplitude: f32,
+    pub wave_a_frequency: f32,
+    pub wave_b_amplitude: f32,
+    pub wave_b_frequency: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -474,6 +536,17 @@ pub struct VehicleConfig {
     pub acceleration: f32,
     pub brake_strength: f32,
     pub air_pitch_torque: f32,
+    pub max_forward_speed: f32,
+    pub max_reverse_speed: f32,
+    pub max_fall_speed: f32,
+    pub linear_speed_scale: f32,
+    pub ground_coast_damping: f32,
+    pub air_base_damping: f32,
+    pub air_env_drag_factor: f32,
+    pub gravity_scale: f32,
+    pub camera_look_ahead_factor: f32,
+    pub camera_look_ahead_min: f32,
+    pub camera_look_ahead_max: f32,
     pub default_weapon_id: String,
 }
 
@@ -606,6 +679,14 @@ mod tests {
                     default_vehicle: "starter_car".to_string(),
                     debug_overlay: true,
                 },
+                terrain: TerrainConfig {
+                    base_height: -170.0,
+                    ramp_slope: 0.0,
+                    wave_a_amplitude: 40.0,
+                    wave_a_frequency: 0.015,
+                    wave_b_amplitude: 20.0,
+                    wave_b_frequency: 0.041,
+                },
             },
             assets: AssetsFile::default(),
             segments: SegmentsFile {
@@ -682,6 +763,17 @@ mod tests {
                     acceleration: 10.0,
                     brake_strength: 5.0,
                     air_pitch_torque: 2.0,
+                    max_forward_speed: 300.0,
+                    max_reverse_speed: 160.0,
+                    max_fall_speed: 240.0,
+                    linear_speed_scale: 7.0,
+                    ground_coast_damping: 0.22,
+                    air_base_damping: 0.10,
+                    air_env_drag_factor: 0.45,
+                    gravity_scale: 1.0,
+                    camera_look_ahead_factor: 1.1,
+                    camera_look_ahead_min: -220.0,
+                    camera_look_ahead_max: 420.0,
                     default_weapon_id: "player_weapon".to_string(),
                 }],
             },
@@ -784,6 +876,17 @@ mod tests {
                     acceleration: 10.0,
                     brake_strength: 5.0,
                     air_pitch_torque: 2.0,
+                    max_forward_speed: 300.0,
+                    max_reverse_speed: 160.0,
+                    max_fall_speed: 240.0,
+                    linear_speed_scale: 7.0,
+                    ground_coast_damping: 0.22,
+                    air_base_damping: 0.10,
+                    air_env_drag_factor: 0.45,
+                    gravity_scale: 1.0,
+                    camera_look_ahead_factor: 1.1,
+                    camera_look_ahead_min: -220.0,
+                    camera_look_ahead_max: 420.0,
                     default_weapon_id: "player_weapon".to_string(),
                 },
             )]),

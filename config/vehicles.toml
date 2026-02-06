@@ -1,7 +1,18 @@
 [[vehicles]]
 id = "starter_car"
 health = 100.0
-acceleration = 24.0
-brake_strength = 18.0
+acceleration = 4.0
+brake_strength = 6.0
 air_pitch_torque = 7.0
+max_forward_speed = 16.5
+max_reverse_speed = 9.0
+max_fall_speed = 18.0
+linear_speed_scale = 1.0
+ground_coast_damping = 0.18
+air_base_damping = 0.09
+air_env_drag_factor = 0.45
+gravity_scale = 0.55
+camera_look_ahead_factor = 1.8
+camera_look_ahead_min = -10.5
+camera_look_ahead_max = 20.0
 default_weapon_id = "player_auto"

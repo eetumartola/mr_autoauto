@@ -206,8 +206,8 @@ environment = "ice"
   - grounded vs airborne state
 - [done] B3. In-air rotation controls (CCW/CW based on accel/brake).
 - [done] B4. Camera follow (look-ahead based on speed; fixed z).
-- [not started] B5. Terrain v1 placeholder: simple height function (sine/ramps) from config.
-- [not started] B6. Stunt metrics:
+- [done] B5. Terrain v1 placeholder: simple height function (sine/ramps) from config.
+- [done] B6. Stunt metrics:
   - airtime, wheelie timer, flip detection, max speed, crash detection.
 
 **DoD**
@@ -221,6 +221,9 @@ environment = "ice"
 **Tasks**
 - [not started] C1. Turret targeting:
   - select nearest enemy within cone/range; configurable prioritization (nearest/strongest).
+  - always draw a blue targeting laser to current aim point.
+  - always draw two green cone boundary lines parented to car/turret transform.
+  - default targeting cone width is 60 degrees and must be configurable/upgradable.
 - [not started] C2. Firing logic:
   - fire rate, burst/spread, projectile spawn offsets.
 - [not started] C3. Projectile simulation:
@@ -387,6 +390,16 @@ environment = "ice"
 - B1-B4 implementation detail: Epic B now has keyboard input mapping (`D`/`Right` accelerate, `A`/`Left` brake), visible placeholder player+ground, flat-ground kinematics with grounded/airborne states, in-air pitch control, and speed-based camera follow.
 - Visual motion detail: temporary checkerboard pattern was added to both background and ground to make movement readability obvious during placeholder art phase.
 - Vehicle feel tuning detail: increased linear speed scaling/caps and replaced frame-based ground friction with time-based damping to produce clearer movement and stronger inertia.
+- B5 implementation detail: drivable ground now uses config-driven terrain height from `game.toml` with two overlapping sine waves plus optional ramp slope; checkerboard ground tiles follow this terrain profile.
+- Vehicle tuning config detail: speed caps, linear speed scale, damping/inertia, and camera look-ahead are now loaded from `vehicles.toml` per vehicle.
+- Terrain readability detail: placeholder ground rendering now uses extruded spline-like columns plus a ridge strip so terrain remains visible at gameplay speed.
+- Default driving tune detail: reduced starter-car top speed/look-ahead and adjusted damping in `vehicles.toml` for better readability while preserving inertia.
+- Stability fix detail: terrain hot-reload updater uses a single combined query for ridge/body tiles to avoid Bevy query-conflict panic (`B0001`).
+- Terrain visibility fix detail: ground tile parent transform is now identity (no vertical offset), so extruded terrain columns/ridge render at the actual spline height.
+- Scale normalization detail: removed dual-unit conversion; gameplay/physics/config/HUD now use meters directly, with camera orthographic scale adjusted for readable on-screen size.
+- B6 implementation detail: stunt metrics now track airtime (current/best), wheelie time (current/best), flip count, max speed, and crash count from hard/awkward landings; metrics are shown in debug HUD.
+- Vehicle mass/jump tuning detail: gravity scale is now vehicle-configurable in `vehicles.toml`; starter car gravity scale was reduced to make jumps possible.
+- Epic C targeting readability requirement: always show blue target laser and green target-cone boundaries; cone defaults to 60 degrees and is configurable/upgradable.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
 - Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.
