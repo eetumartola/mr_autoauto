@@ -248,7 +248,7 @@ environment = "ice"
 **Tasks**
 - [done] D1. Enemy "quad" renderer + hitbox.
 - [done] D2. Enemy behaviors v0 (config-driven):
-  - Walker (ground), Flier (sine hover), Turret (stationary shooter), Charger.
+  - Walker (ground), Flier (sine hover), Turret (stationary shooter), Charger, Bomber (high straight flight + bomb drops).
 - [done] D3. Enemy shooting patterns (simple): aimed shots, arcs, spreads.
 - [not started] D4. Spawner system:
   - distance-based triggers, timed spawns, max alive, cooldown.
@@ -289,14 +289,14 @@ environment = "ice"
 **Goal:** simple progression that makes replay meaningful.
 
 **Tasks**
-- [not started] F1. Score sources:
+- [in progress] F1. Score sources:
   - distance, kills, stunts (airtime/wheelie/flip), "no damage" bonus.
 - [not started] F2. Currency drops (coins/parts).
 - [not started] F3. Upgrade selection UI:
   - after boss / at checkpoints / on level-up, present 2-3 choices.
 - [not started] F4. Upgrade application system:
   - modify weapon/vehicle params; stack rules.
-- [not started] F5. Run end conditions:
+- [done] F5. Run end conditions:
   - health hits 0; show results screen with summary + restart.
 - [not started] F6. High score persistence (local file; for web use local storage if available later).
 
@@ -423,6 +423,11 @@ environment = "ice"
 - Player survivability update: player now has HP state and an in-world HP bar above the vehicle; crash-impact landings apply HP damage so the bar reflects vehicle health changes.
 - D3 implementation detail: enemies now fire back via behavior-driven patterns (walker/turret aimed shots, flier arcing shots, charger spreads), using their configured weapon IDs and weapon stats from TOML.
 - Enemy threat model update: player HP now also takes damage from enemy projectiles and from direct enemy overlap/contact (continuous damage while colliding, scaled by each enemy type's `contact_damage`).
+- Enemy roster update: added `bomber` behavior and a `high_bomber` config type for high, mostly straight flight pressure.
+- Run-end update: when player HP reaches 0 during `InRun`, the game now transitions automatically to `Results` and displays a run summary with score and distance.
+- Bomber behavior tuning update: bombers now fly 20% higher than the previous baseline and attack only by dropping free-falling bombs (no aimed pea-shooter fire).
+- Enemy body interaction update: enemies now resolve physical body overlap against player and each other, including size/mass-weighted pushback and impulse carry-over.
+- Scoring update: enemy types now have configurable `kill_score` in `enemy_types.toml`; kills award per-type score and results now show score with kill contribution breakdown.
 - Scope decision: keep C6 audio/SFX placeholder wiring deferred for later iteration.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.

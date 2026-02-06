@@ -3,6 +3,7 @@ use crate::debug::EnemyDebugMarker;
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
 use bevy::prelude::*;
+use std::collections::HashMap;
 use std::f32::consts::TAU;
 
 const ENEMY_SPAWN_START_AHEAD_M: f32 = 32.0;
@@ -17,18 +18,31 @@ const ENEMY_HP_BAR_FILL_HEIGHT_M: f32 = 0.16;
 const ENEMY_HP_BAR_Z_M: f32 = 0.9;
 const ENEMY_HIT_FLASH_DURATION_S: f32 = 0.12;
 const ENEMY_ATTACK_RANGE_M: f32 = 38.0;
+const ENEMY_BOMBER_DROP_RANGE_M: f32 = 8.5;
 const ENEMY_FLIER_ARC_ANGLE_RAD: f32 = 0.28;
 const ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD: f32 = 0.16;
+const ENEMY_BOMBER_ALTITUDE_SCALE: f32 = 1.2;
+const ENEMY_BOMBER_ALTITUDE_DEFAULT_M: f32 = 8.0;
 const ENEMY_PROJECTILE_Z_M: f32 = 2.0;
 const ENEMY_BULLET_LENGTH_M: f32 = 0.42;
 const ENEMY_BULLET_THICKNESS_M: f32 = 0.10;
 const ENEMY_MISSILE_LENGTH_M: f32 = 0.72;
 const ENEMY_MISSILE_THICKNESS_M: f32 = 0.16;
+const ENEMY_BOMB_LENGTH_M: f32 = 0.62;
+const ENEMY_BOMB_THICKNESS_M: f32 = 0.62;
 const ENEMY_PROJECTILE_ARC_GRAVITY_SCALE: f32 = 0.6;
 const PLAYER_CONTACT_HIT_RADIUS_M: f32 = 1.45;
 const PLAYER_PROJECTILE_HIT_RADIUS_M: f32 = 1.25;
 const MIN_ENEMY_FIRE_RATE_HZ: f32 = 0.05;
 const MIN_ENEMY_FIRE_COOLDOWN_S: f32 = 0.12;
+const ENEMY_EXTERNAL_VELOCITY_DAMPING: f32 = 3.8;
+const PLAYER_COLLISION_RADIUS_M: f32 = 1.4;
+const PLAYER_COLLISION_MASS: f32 = 5.0;
+const ENEMY_COLLISION_IMPULSE_GAIN: f32 = 4.4;
+const ENEMY_PLAYER_COLLISION_IMPULSE_GAIN: f32 = 5.2;
+const ENEMY_COLLISION_SEPARATION_BIAS_M: f32 = 0.02;
+const ENEMY_MASS_PER_RADIUS_SQUARED: f32 = 18.0;
+const ENEMY_MIN_MASS: f32 = 2.4;
 
 pub struct EnemyGameplayPlugin;
 
@@ -41,6 +55,7 @@ impl Plugin for EnemyGameplayPlugin {
                 (
                     spawn_bootstrap_enemies,
                     update_enemy_behaviors,
+                    resolve_enemy_body_collisions,
                     fire_enemy_projectiles,
                     simulate_enemy_projectiles,
                     resolve_enemy_projectile_hits_player,
@@ -110,6 +125,12 @@ struct EnemyBehavior {
 }
 
 #[derive(Component, Debug, Clone, Copy)]
+struct EnemyDynamics {
+    external_velocity_mps: Vec2,
+    mass_kg: f32,
+}
+
+#[derive(Component, Debug, Clone, Copy)]
 struct EnemyAttackState {
     cooldown_s: f32,
     rng_state: u64,
@@ -117,7 +138,9 @@ struct EnemyAttackState {
 
 #[derive(Component, Debug, Clone, Copy)]
 struct EnemyProjectile {
+    kind: EnemyProjectileKind,
     damage: f32,
+    hit_radius_m: f32,
     velocity_mps: Vec2,
     drag: f32,
     gravity_scale: f32,
@@ -128,6 +151,7 @@ struct EnemyProjectile {
 enum EnemyProjectileKind {
     Bullet,
     Missile,
+    Bomb,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -136,6 +160,7 @@ enum EnemyBehaviorKind {
     Flier,
     Turret,
     Charger,
+    Bomber,
 }
 
 #[derive(Resource, Debug, Default)]
@@ -200,6 +225,13 @@ fn spawn_enemy_instance(
 
     let base_altitude = match behavior_kind {
         EnemyBehaviorKind::Flier => ground_y + enemy_cfg.hover_amplitude.max(0.5) + 1.6,
+        EnemyBehaviorKind::Bomber => {
+            ground_y
+                + (enemy_cfg
+                    .hover_amplitude
+                    .max(ENEMY_BOMBER_ALTITUDE_DEFAULT_M)
+                    * ENEMY_BOMBER_ALTITUDE_SCALE)
+        }
         _ => ground_y,
     };
 
@@ -207,6 +239,7 @@ fn spawn_enemy_instance(
         EnemyBehaviorKind::Flier => {
             base_altitude + phase_offset.sin() * enemy_cfg.hover_amplitude.max(0.5)
         }
+        EnemyBehaviorKind::Bomber => base_altitude,
         _ => ground_y,
     };
 
@@ -226,6 +259,10 @@ fn spawn_enemy_instance(
             },
             EnemyMotion {
                 base_speed_mps: enemy_cfg.speed,
+            },
+            EnemyDynamics {
+                external_velocity_mps: Vec2::ZERO,
+                mass_kg: enemy_mass_from_hitbox(enemy_cfg.hitbox_radius),
             },
             EnemyBehavior {
                 kind: behavior_kind,
@@ -284,6 +321,7 @@ fn update_enemy_behaviors(
         (
             &mut Transform,
             &mut EnemyBehavior,
+            &mut EnemyDynamics,
             &EnemyMotion,
             &EnemyHitbox,
             &EnemyTypeId,
@@ -297,7 +335,9 @@ fn update_enemy_behaviors(
     let player_x = player_transform.translation.x;
     let dt = time.delta_secs();
 
-    for (mut transform, mut behavior, motion, hitbox, enemy_type_id) in &mut enemy_query {
+    for (mut transform, mut behavior, mut dynamics, motion, hitbox, enemy_type_id) in
+        &mut enemy_query
+    {
         let ground_offset = hitbox.radius_m.max(0.15);
         behavior.elapsed_s += dt;
 
@@ -347,10 +387,157 @@ fn update_enemy_behaviors(
                     .y
                     .lerp(ground_y, (GROUND_FOLLOW_SNAP_RATE * dt).clamp(0.0, 1.0));
             }
+            EnemyBehaviorKind::Bomber => {
+                transform.translation.x -= motion.base_speed_mps * 0.95 * dt;
+                transform.translation.y = transform
+                    .translation
+                    .y
+                    .lerp(behavior.base_altitude_m, (4.0 * dt).clamp(0.0, 1.0));
+            }
         }
+
+        transform.translation += (dynamics.external_velocity_mps * dt).extend(0.0);
+        dynamics.external_velocity_mps *= f32::exp(-ENEMY_EXTERNAL_VELOCITY_DAMPING * dt);
 
         if enemy_type_id.0.is_empty() {
             warn!("Encountered enemy with empty type id.");
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn resolve_enemy_body_collisions(
+    mut player_query: Query<&mut Transform, (With<PlayerVehicle>, Without<Enemy>)>,
+    mut enemy_queries: ParamSet<(
+        Query<(Entity, &Transform, &EnemyHitbox, &EnemyDynamics), With<Enemy>>,
+        Query<(Entity, &mut Transform, &mut EnemyDynamics), With<Enemy>>,
+    )>,
+) {
+    #[derive(Debug, Clone, Copy)]
+    struct EnemyBodySnapshot {
+        entity: Entity,
+        position: Vec2,
+        radius_m: f32,
+        mass_kg: f32,
+    }
+
+    let Ok(mut player_transform) = player_query.single_mut() else {
+        return;
+    };
+    let player_position = player_transform.translation.truncate();
+
+    let snapshots: Vec<EnemyBodySnapshot> = enemy_queries
+        .p0()
+        .iter()
+        .map(|(entity, transform, hitbox, dynamics)| EnemyBodySnapshot {
+            entity,
+            position: transform.translation.truncate(),
+            radius_m: hitbox.radius_m.max(0.05),
+            mass_kg: dynamics.mass_kg.max(ENEMY_MIN_MASS),
+        })
+        .collect();
+
+    if snapshots.is_empty() {
+        return;
+    }
+
+    let mut player_position_offset = Vec2::ZERO;
+    let mut enemy_position_offsets: HashMap<Entity, Vec2> = HashMap::new();
+    let mut enemy_velocity_impulses: HashMap<Entity, Vec2> = HashMap::new();
+
+    for enemy in &snapshots {
+        let to_enemy = enemy.position - player_position;
+        let distance = to_enemy.length();
+        let combined_radius = PLAYER_COLLISION_RADIUS_M + enemy.radius_m;
+        if distance >= combined_radius {
+            continue;
+        }
+
+        let normal = if distance > 0.0001 {
+            to_enemy / distance
+        } else {
+            Vec2::X
+        };
+        let penetration = (combined_radius - distance + ENEMY_COLLISION_SEPARATION_BIAS_M).max(0.0);
+        if penetration <= 0.0 {
+            continue;
+        }
+
+        let inv_player_mass = 1.0 / PLAYER_COLLISION_MASS.max(0.01);
+        let inv_enemy_mass = 1.0 / enemy.mass_kg.max(0.01);
+        let inv_total = inv_player_mass + inv_enemy_mass;
+        if inv_total <= f32::EPSILON {
+            continue;
+        }
+
+        let player_share = inv_player_mass / inv_total;
+        let enemy_share = inv_enemy_mass / inv_total;
+        let correction = normal * penetration;
+
+        player_position_offset -= correction * player_share;
+        *enemy_position_offsets
+            .entry(enemy.entity)
+            .or_insert(Vec2::ZERO) += correction * enemy_share;
+        *enemy_velocity_impulses
+            .entry(enemy.entity)
+            .or_insert(Vec2::ZERO) += normal * (penetration * ENEMY_PLAYER_COLLISION_IMPULSE_GAIN);
+    }
+
+    for i in 0..snapshots.len() {
+        for j in (i + 1)..snapshots.len() {
+            let a = snapshots[i];
+            let b = snapshots[j];
+            let delta = b.position - a.position;
+            let distance = delta.length();
+            let combined_radius = a.radius_m + b.radius_m;
+            if distance >= combined_radius {
+                continue;
+            }
+
+            let normal = if distance > 0.0001 {
+                delta / distance
+            } else {
+                Vec2::X
+            };
+            let penetration =
+                (combined_radius - distance + ENEMY_COLLISION_SEPARATION_BIAS_M).max(0.0);
+            if penetration <= 0.0 {
+                continue;
+            }
+
+            let inv_mass_a = 1.0 / a.mass_kg.max(0.01);
+            let inv_mass_b = 1.0 / b.mass_kg.max(0.01);
+            let inv_total = inv_mass_a + inv_mass_b;
+            if inv_total <= f32::EPSILON {
+                continue;
+            }
+
+            let a_share = inv_mass_a / inv_total;
+            let b_share = inv_mass_b / inv_total;
+            let correction = normal * penetration;
+
+            *enemy_position_offsets.entry(a.entity).or_insert(Vec2::ZERO) -= correction * a_share;
+            *enemy_position_offsets.entry(b.entity).or_insert(Vec2::ZERO) += correction * b_share;
+
+            let impulse = normal * (penetration * ENEMY_COLLISION_IMPULSE_GAIN);
+            *enemy_velocity_impulses
+                .entry(a.entity)
+                .or_insert(Vec2::ZERO) -= impulse * a_share;
+            *enemy_velocity_impulses
+                .entry(b.entity)
+                .or_insert(Vec2::ZERO) += impulse * b_share;
+        }
+    }
+
+    player_transform.translation += player_position_offset.extend(0.0);
+
+    for (entity, mut transform, mut dynamics) in &mut enemy_queries.p1() {
+        if let Some(offset) = enemy_position_offsets.get(&entity) {
+            transform.translation += offset.extend(0.0);
+        }
+        if let Some(impulse) = enemy_velocity_impulses.get(&entity) {
+            let mass = dynamics.mass_kg.max(0.01);
+            dynamics.external_velocity_mps += *impulse / mass;
         }
     }
 }
@@ -394,9 +581,32 @@ fn fire_enemy_projectiles(
         let enemy_position = enemy_transform.translation.truncate();
         let to_player = player_position - enemy_position;
         let distance_to_player_m = to_player.length();
+        let fire_cooldown_s =
+            (1.0 / weapon.fire_rate.max(MIN_ENEMY_FIRE_RATE_HZ)).max(MIN_ENEMY_FIRE_COOLDOWN_S);
+
+        if behavior.kind == EnemyBehaviorKind::Bomber {
+            let x_distance = (enemy_position.x - player_position.x).abs();
+            let has_drop_window = x_distance <= ENEMY_BOMBER_DROP_RANGE_M;
+            let player_is_below = player_position.y < (enemy_position.y - 0.5);
+            if !has_drop_window || !player_is_below {
+                attack_state.cooldown_s = fire_cooldown_s;
+                continue;
+            }
+
+            let bomb_spawn_world = enemy_position + Vec2::new(0.0, -(hitbox.radius_m + 0.2));
+            spawn_enemy_projectile(
+                &mut commands,
+                weapon,
+                behavior.kind,
+                bomb_spawn_world,
+                Vec2::NEG_Y,
+            );
+            attack_state.cooldown_s = fire_cooldown_s;
+            continue;
+        }
+
         if distance_to_player_m <= 0.001 || distance_to_player_m > ENEMY_ATTACK_RANGE_M {
-            attack_state.cooldown_s =
-                (1.0 / weapon.fire_rate.max(MIN_ENEMY_FIRE_RATE_HZ)).max(MIN_ENEMY_FIRE_COOLDOWN_S);
+            attack_state.cooldown_s = fire_cooldown_s;
             continue;
         }
 
@@ -437,8 +647,6 @@ fn fire_enemy_projectiles(
             }
         }
 
-        let fire_cooldown_s =
-            (1.0 / weapon.fire_rate.max(MIN_ENEMY_FIRE_RATE_HZ)).max(MIN_ENEMY_FIRE_COOLDOWN_S);
         let burst_extension_s =
             weapon.burst_interval_seconds.max(0.0) * burst_count.saturating_sub(1) as f32;
         attack_state.cooldown_s = fire_cooldown_s + burst_extension_s;
@@ -468,7 +676,9 @@ fn simulate_enemy_projectiles(
         projectile.velocity_mps *= drag_damping;
         transform.translation += (projectile.velocity_mps * dt).extend(0.0);
 
-        if projectile.velocity_mps.length_squared() > f32::EPSILON {
+        if projectile.kind == EnemyProjectileKind::Bomb {
+            transform.rotate_z(3.4 * dt);
+        } else if projectile.velocity_mps.length_squared() > f32::EPSILON {
             let angle = projectile.velocity_mps.y.atan2(projectile.velocity_mps.x);
             transform.rotation = Quat::from_rotation_z(angle);
         }
@@ -495,13 +705,15 @@ fn resolve_enemy_projectile_hits_player(
         return;
     };
     let player_position = player_transform.translation.truncate();
-    let hit_radius_sq = PLAYER_PROJECTILE_HIT_RADIUS_M * PLAYER_PROJECTILE_HIT_RADIUS_M;
 
     let mut total_damage = 0.0;
     let mut consumed_projectiles = Vec::new();
     for (projectile_entity, transform, projectile) in &projectile_query {
         let projectile_position = transform.translation.truncate();
-        if projectile_position.distance_squared(player_position) <= hit_radius_sq {
+        let combined_hit_radius = PLAYER_PROJECTILE_HIT_RADIUS_M + projectile.hit_radius_m;
+        if projectile_position.distance_squared(player_position)
+            <= (combined_hit_radius * combined_hit_radius)
+        {
             total_damage += projectile.damage.max(0.0);
             consumed_projectiles.push(projectile_entity);
         }
@@ -578,7 +790,9 @@ fn rearm_bootstrap_when_empty(
 
 fn shot_pattern_for_behavior(kind: EnemyBehaviorKind) -> ([f32; 3], usize) {
     match kind {
-        EnemyBehaviorKind::Walker | EnemyBehaviorKind::Turret => ([0.0, 0.0, 0.0], 1),
+        EnemyBehaviorKind::Walker | EnemyBehaviorKind::Turret | EnemyBehaviorKind::Bomber => {
+            ([0.0, 0.0, 0.0], 1)
+        }
         EnemyBehaviorKind::Flier => ([ENEMY_FLIER_ARC_ANGLE_RAD, 0.0, 0.0], 1),
         EnemyBehaviorKind::Charger => (
             [
@@ -598,20 +812,32 @@ fn spawn_enemy_projectile(
     muzzle_world: Vec2,
     shot_direction_world: Vec2,
 ) {
-    let projectile_kind = match weapon.projectile_type.as_str() {
-        "missile" => EnemyProjectileKind::Missile,
-        _ => EnemyProjectileKind::Bullet,
+    let projectile_kind = if behavior_kind == EnemyBehaviorKind::Bomber {
+        EnemyProjectileKind::Bomb
+    } else {
+        match weapon.projectile_type.as_str() {
+            "missile" => EnemyProjectileKind::Missile,
+            _ => EnemyProjectileKind::Bullet,
+        }
     };
-    let (length_m, thickness_m, color) = match projectile_kind {
+    let (length_m, thickness_m, hit_radius_m, color) = match projectile_kind {
         EnemyProjectileKind::Bullet => (
             ENEMY_BULLET_LENGTH_M,
             ENEMY_BULLET_THICKNESS_M,
+            ENEMY_BULLET_THICKNESS_M * 0.5,
             Color::srgba(1.0, 0.64, 0.26, 0.88),
         ),
         EnemyProjectileKind::Missile => (
             ENEMY_MISSILE_LENGTH_M,
             ENEMY_MISSILE_THICKNESS_M,
+            ENEMY_MISSILE_THICKNESS_M * 0.55,
             Color::srgba(1.0, 0.48, 0.22, 0.92),
+        ),
+        EnemyProjectileKind::Bomb => (
+            ENEMY_BOMB_LENGTH_M,
+            ENEMY_BOMB_THICKNESS_M,
+            ENEMY_BOMB_THICKNESS_M * 0.48,
+            Color::srgba(0.98, 0.62, 0.18, 0.96),
         ),
     };
 
@@ -624,6 +850,12 @@ fn spawn_enemy_projectile(
                 0.0
             }
         }
+        EnemyProjectileKind::Bomb => 1.0,
+    };
+
+    let initial_velocity = match projectile_kind {
+        EnemyProjectileKind::Bomb => Vec2::ZERO,
+        _ => shot_direction_world * weapon.bullet_speed.max(0.1),
     };
 
     let projectile_center = muzzle_world + (shot_direction_world * (length_m * 0.5));
@@ -632,8 +864,10 @@ fn spawn_enemy_projectile(
     commands.spawn((
         Name::new("EnemyProjectile"),
         EnemyProjectile {
+            kind: projectile_kind,
             damage: weapon.damage.max(0.0),
-            velocity_mps: shot_direction_world * weapon.bullet_speed.max(0.1),
+            hit_radius_m,
+            velocity_mps: initial_velocity,
             drag: weapon.projectile_drag.max(0.0),
             gravity_scale,
             remaining_lifetime_s: weapon.projectile_lifetime_seconds.max(0.05),
@@ -646,6 +880,11 @@ fn spawn_enemy_projectile(
         )
         .with_rotation(Quat::from_rotation_z(shot_angle)),
     ));
+}
+
+fn enemy_mass_from_hitbox(hitbox_radius_m: f32) -> f32 {
+    let radius = hitbox_radius_m.max(0.1);
+    ((radius * radius) * ENEMY_MASS_PER_RADIUS_SQUARED).max(ENEMY_MIN_MASS)
 }
 
 fn next_signed_unit_random(seed: &mut u64) -> f32 {
@@ -738,6 +977,7 @@ fn body_size_for_behavior(kind: EnemyBehaviorKind, hitbox_radius: f32) -> Vec2 {
         EnemyBehaviorKind::Flier => Vec2::new(r * 2.0, r * 1.6),
         EnemyBehaviorKind::Turret => Vec2::new(r * 2.5, r * 2.2),
         EnemyBehaviorKind::Charger => Vec2::new(r * 2.7, r * 1.9),
+        EnemyBehaviorKind::Bomber => Vec2::new(r * 3.1, r * 1.6),
     }
 }
 
@@ -747,6 +987,7 @@ fn color_for_behavior(kind: EnemyBehaviorKind) -> Color {
         EnemyBehaviorKind::Flier => Color::srgb(0.54, 0.74, 0.92),
         EnemyBehaviorKind::Turret => Color::srgb(0.81, 0.54, 0.84),
         EnemyBehaviorKind::Charger => Color::srgb(0.90, 0.41, 0.41),
+        EnemyBehaviorKind::Bomber => Color::srgb(0.73, 0.78, 0.85),
     }
 }
 
@@ -759,6 +1000,7 @@ fn behavior_kind_from_config(raw: &str) -> EnemyBehaviorKind {
         "flier" => EnemyBehaviorKind::Flier,
         "turret" => EnemyBehaviorKind::Turret,
         "charger" => EnemyBehaviorKind::Charger,
+        "bomber" => EnemyBehaviorKind::Bomber,
         _ => EnemyBehaviorKind::Walker,
     }
 }

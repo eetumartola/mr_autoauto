@@ -206,10 +206,10 @@ impl GameConfig {
             }
             if !matches!(
                 enemy.behavior.as_str(),
-                "walker" | "flier" | "turret" | "charger"
+                "walker" | "flier" | "turret" | "charger" | "bomber"
             ) {
                 return Err(ConfigError::Validation(format!(
-                    "enemy_types.toml::enemy_types[{index}].behavior `{}` is unsupported (expected walker/flier/turret/charger)",
+                    "enemy_types.toml::enemy_types[{index}].behavior `{}` is unsupported (expected walker/flier/turret/charger/bomber)",
                     enemy.behavior
                 )));
             }
@@ -614,6 +614,8 @@ pub struct EnemyTypeConfig {
     pub health: f32,
     pub speed: f32,
     pub contact_damage: f32,
+    #[serde(default = "default_enemy_kill_score")]
+    pub kill_score: u32,
     pub weapon_id: String,
     pub hitbox_radius: f32,
     #[serde(default)]
@@ -622,6 +624,10 @@ pub struct EnemyTypeConfig {
     pub hover_frequency: f32,
     #[serde(default)]
     pub charge_speed_multiplier: f32,
+}
+
+fn default_enemy_kill_score() -> u32 {
+    10
 }
 
 impl HasId for EnemyTypeConfig {
@@ -937,6 +943,7 @@ mod tests {
                     health: 10.0,
                     speed: 1.0,
                     contact_damage: 2.0,
+                    kill_score: 12,
                     weapon_id: "enemy_weapon".to_string(),
                     hitbox_radius: 0.5,
                     hover_amplitude: 0.0,
@@ -1074,6 +1081,7 @@ mod tests {
                     health: 10.0,
                     speed: 1.0,
                     contact_damage: 2.0,
+                    kill_score: 12,
                     weapon_id: "enemy_weapon".to_string(),
                     hitbox_radius: 0.5,
                     hover_amplitude: 0.0,

@@ -4,6 +4,7 @@ behavior = "walker"
 health = 24.0
 speed = 4.2
 contact_damage = 5.0
+kill_score = 25
 weapon_id = "enemy_pea_shooter"
 hitbox_radius = 0.55
 
@@ -13,6 +14,7 @@ behavior = "flier"
 health = 18.0
 speed = 3.4
 contact_damage = 4.0
+kill_score = 35
 weapon_id = "enemy_pea_shooter"
 hitbox_radius = 0.45
 hover_amplitude = 1.8
@@ -24,6 +26,7 @@ behavior = "turret"
 health = 36.0
 speed = 0.5
 contact_damage = 8.0
+kill_score = 60
 weapon_id = "enemy_pea_shooter"
 hitbox_radius = 0.65
 
@@ -33,6 +36,18 @@ behavior = "charger"
 health = 30.0
 speed = 3.6
 contact_damage = 10.0
+kill_score = 50
 weapon_id = "enemy_pea_shooter"
 hitbox_radius = 0.60
 charge_speed_multiplier = 2.2
+
+[[enemy_types]]
+id = "high_bomber"
+behavior = "bomber"
+health = 42.0
+speed = 4.0
+contact_damage = 9.0
+kill_score = 90
+weapon_id = "enemy_bomb_drop"
+hitbox_radius = 0.72
+hover_amplitude = 8.5

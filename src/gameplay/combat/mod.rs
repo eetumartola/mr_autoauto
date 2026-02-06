@@ -1,6 +1,6 @@
 use crate::config::GameConfig;
 use crate::gameplay::enemies::{
-    enemy_hit_flash_duration_seconds, Enemy, EnemyHealth, EnemyHitFlash, EnemyHitbox,
+    enemy_hit_flash_duration_seconds, Enemy, EnemyHealth, EnemyHitFlash, EnemyHitbox, EnemyTypeId,
 };
 use crate::gameplay::vehicle::PlayerVehicle;
 use crate::states::GameState;
@@ -31,12 +31,18 @@ const EXPLOSION_FX_SIZE_M: Vec2 = Vec2::new(1.45, 1.45);
 const EXPLOSION_FX_LIFETIME_S: f32 = 0.28;
 const FX_Z: f32 = 4.4;
 
+#[derive(Message, Debug, Clone)]
+pub struct EnemyKilledEvent {
+    pub enemy_type_id: String,
+}
+
 pub struct CombatGameplayPlugin;
 
 impl Plugin for CombatGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TurretTargetingState>()
             .init_resource::<TurretFireState>()
+            .add_message::<EnemyKilledEvent>()
             .add_systems(
                 OnEnter(GameState::InRun),
                 (reset_turret_targeting_state, reset_turret_fire_state),
@@ -498,7 +504,17 @@ fn simulate_player_projectiles(
 fn resolve_player_projectile_enemy_hits(
     mut commands: Commands,
     projectile_query: Query<(Entity, &Transform, &PlayerProjectile)>,
-    mut enemy_query: Query<(Entity, &Transform, &EnemyHitbox, &mut EnemyHealth), With<Enemy>>,
+    mut enemy_query: Query<
+        (
+            Entity,
+            &Transform,
+            &EnemyHitbox,
+            &EnemyTypeId,
+            &mut EnemyHealth,
+        ),
+        With<Enemy>,
+    >,
+    mut killed_message_writer: MessageWriter<EnemyKilledEvent>,
 ) {
     let projectile_snapshots: Vec<(Entity, Vec2, f32, PlayerProjectileKind)> = projectile_query
         .iter()
@@ -523,14 +539,14 @@ fn resolve_player_projectile_enemy_hits(
     let mut impact_fx_positions = Vec::new();
     let mut explosion_fx_positions = Vec::new();
 
-    for (enemy_entity, enemy_transform, hitbox, mut health) in &mut enemy_query {
+    for (enemy_entity, enemy_transform, hitbox, enemy_type_id, mut health) in &mut enemy_query {
+        let enemy_position = enemy_transform.translation.truncate();
         if health.current <= 0.0 {
-            dead_enemies.push(enemy_entity);
-            explosion_fx_positions.push(enemy_transform.translation.truncate());
+            dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
+            explosion_fx_positions.push(enemy_position);
             continue;
         }
 
-        let enemy_position = enemy_transform.translation.truncate();
         for (projectile_entity, projectile_position, damage, projectile_kind) in
             &projectile_snapshots
         {
@@ -549,7 +565,7 @@ fn resolve_player_projectile_enemy_hits(
             impact_fx_positions.push((*projectile_position, *projectile_kind));
 
             if health.current <= 0.0 {
-                dead_enemies.push(enemy_entity);
+                dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
                 explosion_fx_positions.push(enemy_position);
                 break;
             } else {
@@ -576,7 +592,8 @@ fn resolve_player_projectile_enemy_hits(
         spawn_explosion_fx(&mut commands, position);
     }
 
-    for enemy_entity in dead_enemies {
+    for (enemy_entity, enemy_type_id) in dead_enemies {
+        killed_message_writer.write(EnemyKilledEvent { enemy_type_id });
         commands.entity(enemy_entity).despawn();
     }
 }
