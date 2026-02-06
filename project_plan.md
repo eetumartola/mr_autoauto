@@ -414,6 +414,7 @@ environment = "ice"
 - C2 implementation detail: auto-fire now uses `weapons.toml` data for `fire_rate`, `spread_degrees`, `burst_count`, `burst_interval_seconds`, and muzzle spawn offsets (`muzzle_offset_x/y`), spawning visible placeholder projectiles from the turret.
 - C3 implementation detail: projectile simulation now supports config-driven bullet drag plus missile ballistic gravity and optional bounded homing turn-rate, with projectile type selected by `weapons.toml::projectile_type`.
 - C3 stability fix: projectile simulation queries now use explicit `Without` filters between enemy and projectile transform access to avoid Bevy ECS B0001 conflicts at runtime.
+- Missile channel behavior update: player now has a separate optional secondary missile weapon slot (`vehicles.toml::secondary_weapon_id`) with independent cadence (`missile_fire_interval_seconds`, default 2.0s), so bullets and missiles auto-fire in parallel when a target is currently acquired; launched missiles continue homing by physics even if the target later leaves the cone.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
 - Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.

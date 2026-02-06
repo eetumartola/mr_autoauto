@@ -29,3 +29,19 @@ projectile_drag = 0.02
 projectile_lifetime_seconds = 2.2
 missile_gravity_scale = 1.0
 homing_turn_rate_degrees = 0.0
+
+[[weapons]]
+id = "player_missile"
+projectile_type = "missile"
+bullet_speed = 21.0
+fire_rate = 0.5
+spread_degrees = 0.0
+damage = 16.0
+burst_count = 1
+burst_interval_seconds = 0.0
+muzzle_offset_x = 2.1
+muzzle_offset_y = 0.25
+projectile_drag = 0.08
+projectile_lifetime_seconds = 4.2
+missile_gravity_scale = 0.18
+homing_turn_rate_degrees = 95.0

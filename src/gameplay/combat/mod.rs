@@ -99,6 +99,7 @@ impl Default for TurretTargetingState {
 #[derive(Resource, Debug, Clone)]
 struct TurretFireState {
     next_fire_time_s: f64,
+    next_missile_fire_time_s: f64,
     burst_shots_remaining: u32,
     next_burst_shot_time_s: f64,
     rng_state: u64,
@@ -108,6 +109,7 @@ impl Default for TurretFireState {
     fn default() -> Self {
         Self {
             next_fire_time_s: 0.0,
+            next_missile_fire_time_s: 0.0,
             burst_shots_remaining: 0,
             next_burst_shot_time_s: 0.0,
             rng_state: 0xA77C_C1B5_D7E3_42FD,
@@ -288,7 +290,7 @@ fn fire_turret_projectiles(
         return;
     };
 
-    let Some(weapon) = config.weapons_by_id.get(&vehicle_config.default_weapon_id) else {
+    let Some(primary_weapon) = config.weapons_by_id.get(&vehicle_config.default_weapon_id) else {
         return;
     };
 
@@ -298,15 +300,11 @@ fn fire_turret_projectiles(
     }
 
     let now = time.elapsed_secs_f64();
-    let trigger_interval_s = (1.0 / weapon.fire_rate.max(0.001)) as f64;
-    let burst_interval_s = (weapon.burst_interval_seconds as f64).max(MIN_BURST_INTERVAL_S);
-    let shots_per_burst = weapon.burst_count.max(1);
+    let trigger_interval_s = (1.0 / primary_weapon.fire_rate.max(0.001)) as f64;
+    let burst_interval_s = (primary_weapon.burst_interval_seconds as f64).max(MIN_BURST_INTERVAL_S);
+    let shots_per_burst = primary_weapon.burst_count.max(1);
 
-    if fire_state.burst_shots_remaining == 0 {
-        if now < fire_state.next_fire_time_s {
-            return;
-        }
-
+    if fire_state.burst_shots_remaining == 0 && now >= fire_state.next_fire_time_s {
         fire_state.burst_shots_remaining = shots_per_burst;
         fire_state.next_burst_shot_time_s = now;
         fire_state.next_fire_time_s = now + trigger_interval_s;
@@ -314,13 +312,11 @@ fn fire_turret_projectiles(
 
     let player_rotation_rad = player_transform.rotation.to_euler(EulerRot::XYZ).2;
     let player_rotation = Mat2::from_angle(player_rotation_rad);
-    let muzzle_offset_local = Vec2::new(weapon.muzzle_offset_x, weapon.muzzle_offset_y);
-    let muzzle_world = player_transform.translation.truncate()
-        + player_rotation * (TURRET_MOUNT_OFFSET_LOCAL.truncate() + muzzle_offset_local);
+    let turret_origin_world = player_transform.translation.truncate()
+        + player_rotation * TURRET_MOUNT_OFFSET_LOCAL.truncate();
 
-    let spread_half_angle_rad = weapon.spread_degrees.to_radians() * 0.5;
+    let spread_half_angle_rad = primary_weapon.spread_degrees.to_radians() * 0.5;
     let mut shots_spawned = 0_u32;
-    let projectile_kind = parse_projectile_kind(&weapon.projectile_type);
 
     while fire_state.burst_shots_remaining > 0
         && now >= fire_state.next_burst_shot_time_s
@@ -335,43 +331,46 @@ fn fire_turret_projectiles(
             break;
         }
 
-        let shot_angle_world = shot_direction_world.y.atan2(shot_direction_world.x);
-        let (projectile_length, projectile_thickness, projectile_color) = match projectile_kind {
-            PlayerProjectileKind::Bullet => (
-                BULLET_LENGTH_M,
-                BULLET_THICKNESS_M,
-                Color::srgba(0.96, 0.92, 0.70, 0.92),
-            ),
-            PlayerProjectileKind::Missile => (
-                MISSILE_LENGTH_M,
-                MISSILE_THICKNESS_M,
-                Color::srgba(0.95, 0.58, 0.20, 0.95),
-            ),
-        };
-        let projectile_center = muzzle_world + (shot_direction_world * (projectile_length * 0.5));
-
-        commands.spawn((
-            Name::new("PlayerProjectile"),
-            PlayerProjectile {
-                kind: projectile_kind,
-                velocity_mps: shot_direction_world * weapon.bullet_speed,
-                drag: weapon.projectile_drag,
-                remaining_lifetime_s: weapon.projectile_lifetime_seconds,
-                homing_turn_rate_rad_s: weapon.homing_turn_rate_degrees.to_radians(),
-                gravity_scale: weapon.missile_gravity_scale,
-                target_entity: targeting.target_entity,
-            },
-            Sprite::from_color(
-                projectile_color,
-                Vec2::new(projectile_length, projectile_thickness),
-            ),
-            Transform::from_xyz(projectile_center.x, projectile_center.y, PROJECTILE_Z)
-                .with_rotation(Quat::from_rotation_z(shot_angle_world)),
-        ));
+        spawn_player_projectile(
+            &mut commands,
+            primary_weapon,
+            shot_direction_world,
+            turret_origin_world,
+            player_rotation,
+            targeting.target_entity,
+        );
 
         fire_state.burst_shots_remaining -= 1;
         fire_state.next_burst_shot_time_s += burst_interval_s;
         shots_spawned += 1;
+    }
+
+    if let Some(secondary_weapon_id) = vehicle_config.secondary_weapon_id.as_deref() {
+        if now >= fire_state.next_missile_fire_time_s {
+            if let Some(secondary_weapon) = config.weapons_by_id.get(secondary_weapon_id) {
+                let missile_spread_half_angle = secondary_weapon.spread_degrees.to_radians() * 0.5;
+                let missile_spread_angle =
+                    next_signed_unit_random(&mut fire_state.rng_state) * missile_spread_half_angle;
+                let missile_direction_local = (Mat2::from_angle(missile_spread_angle)
+                    * base_direction_local)
+                    .normalize_or_zero();
+                let missile_direction_world =
+                    (player_rotation * missile_direction_local).normalize_or_zero();
+
+                if missile_direction_world.length_squared() > f32::EPSILON {
+                    spawn_player_projectile(
+                        &mut commands,
+                        secondary_weapon,
+                        missile_direction_world,
+                        turret_origin_world,
+                        player_rotation,
+                        targeting.target_entity,
+                    );
+                    fire_state.next_missile_fire_time_s =
+                        now + vehicle_config.missile_fire_interval_seconds.max(0.001) as f64;
+                }
+            }
+        }
     }
 }
 
@@ -416,10 +415,7 @@ fn simulate_player_projectiles(
     time: Res<Time>,
     config: Res<GameConfig>,
     enemy_query: Query<&Transform, (With<Enemy>, Without<PlayerProjectile>)>,
-    mut projectile_query: Query<
-        (Entity, &mut Transform, &mut PlayerProjectile),
-        Without<Enemy>,
-    >,
+    mut projectile_query: Query<(Entity, &mut Transform, &mut PlayerProjectile), Without<Enemy>>,
 ) {
     let Some(environment) = config
         .environments_by_id
@@ -519,4 +515,51 @@ fn next_signed_unit_random(seed: &mut u64) -> f32 {
 
 fn shortest_angle_delta_rad(target: f32, current: f32) -> f32 {
     (target - current + PI).rem_euclid(TAU) - PI
+}
+
+fn spawn_player_projectile(
+    commands: &mut Commands,
+    weapon: &crate::config::WeaponConfig,
+    shot_direction_world: Vec2,
+    turret_origin_world: Vec2,
+    player_rotation: Mat2,
+    target_entity: Option<Entity>,
+) {
+    let projectile_kind = parse_projectile_kind(&weapon.projectile_type);
+    let (projectile_length, projectile_thickness, projectile_color) = match projectile_kind {
+        PlayerProjectileKind::Bullet => (
+            BULLET_LENGTH_M,
+            BULLET_THICKNESS_M,
+            Color::srgba(0.96, 0.92, 0.70, 0.92),
+        ),
+        PlayerProjectileKind::Missile => (
+            MISSILE_LENGTH_M,
+            MISSILE_THICKNESS_M,
+            Color::srgba(0.95, 0.58, 0.20, 0.95),
+        ),
+    };
+
+    let muzzle_offset_local = Vec2::new(weapon.muzzle_offset_x, weapon.muzzle_offset_y);
+    let muzzle_world = turret_origin_world + (player_rotation * muzzle_offset_local);
+    let projectile_center = muzzle_world + (shot_direction_world * (projectile_length * 0.5));
+    let shot_angle_world = shot_direction_world.y.atan2(shot_direction_world.x);
+
+    commands.spawn((
+        Name::new("PlayerProjectile"),
+        PlayerProjectile {
+            kind: projectile_kind,
+            velocity_mps: shot_direction_world * weapon.bullet_speed,
+            drag: weapon.projectile_drag,
+            remaining_lifetime_s: weapon.projectile_lifetime_seconds,
+            homing_turn_rate_rad_s: weapon.homing_turn_rate_degrees.to_radians(),
+            gravity_scale: weapon.missile_gravity_scale,
+            target_entity,
+        },
+        Sprite::from_color(
+            projectile_color,
+            Vec2::new(projectile_length, projectile_thickness),
+        ),
+        Transform::from_xyz(projectile_center.x, projectile_center.y, PROJECTILE_Z)
+            .with_rotation(Quat::from_rotation_z(shot_angle_world)),
+    ));
 }

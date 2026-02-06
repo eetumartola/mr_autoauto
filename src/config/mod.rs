@@ -303,6 +303,23 @@ impl GameConfig {
                     vehicle.default_weapon_id
                 )));
             }
+            if let Some(secondary_weapon_id) = vehicle.secondary_weapon_id.as_deref() {
+                let Some(secondary_weapon) = self.weapons_by_id.get(secondary_weapon_id) else {
+                    return Err(ConfigError::Validation(format!(
+                        "vehicles.toml::vehicles[{index}].secondary_weapon_id references unknown weapon id `{secondary_weapon_id}`"
+                    )));
+                };
+                if secondary_weapon.projectile_type != "missile" {
+                    return Err(ConfigError::Validation(format!(
+                        "vehicles.toml::vehicles[{index}].secondary_weapon_id must point to a missile weapon"
+                    )));
+                }
+                if vehicle.missile_fire_interval_seconds <= 0.0 {
+                    return Err(ConfigError::Validation(format!(
+                        "vehicles.toml::vehicles[{index}].missile_fire_interval_seconds must be > 0 when secondary_weapon_id is set"
+                    )));
+                }
+            }
             if vehicle.max_forward_speed <= 0.0 {
                 return Err(ConfigError::Validation(format!(
                     "vehicles.toml::vehicles[{index}].max_forward_speed must be > 0"
@@ -715,6 +732,10 @@ pub struct VehicleConfig {
     pub turret_cone_degrees: f32,
     #[serde(default = "default_turret_target_priority")]
     pub turret_target_priority: String,
+    #[serde(default)]
+    pub secondary_weapon_id: Option<String>,
+    #[serde(default = "default_missile_fire_interval_seconds")]
+    pub missile_fire_interval_seconds: f32,
     pub camera_look_ahead_factor: f32,
     pub camera_look_ahead_min: f32,
     pub camera_look_ahead_max: f32,
@@ -731,6 +752,10 @@ fn default_turret_cone_degrees() -> f32 {
 
 fn default_turret_target_priority() -> String {
     "nearest".to_string()
+}
+
+fn default_missile_fire_interval_seconds() -> f32 {
+    2.0
 }
 
 impl HasId for VehicleConfig {
@@ -985,6 +1010,8 @@ mod tests {
                     turret_range_m: 28.0,
                     turret_cone_degrees: 60.0,
                     turret_target_priority: "nearest".to_string(),
+                    secondary_weapon_id: None,
+                    missile_fire_interval_seconds: 2.0,
                     camera_look_ahead_factor: 1.1,
                     camera_look_ahead_min: -220.0,
                     camera_look_ahead_max: 420.0,
@@ -1126,6 +1153,8 @@ mod tests {
                     turret_range_m: 28.0,
                     turret_cone_degrees: 60.0,
                     turret_target_priority: "nearest".to_string(),
+                    secondary_weapon_id: None,
+                    missile_fire_interval_seconds: 2.0,
                     camera_look_ahead_factor: 1.1,
                     camera_look_ahead_min: -220.0,
                     camera_look_ahead_max: 420.0,
