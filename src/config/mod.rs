@@ -68,6 +68,7 @@ fn log_config_summary(prefix: &str, config: &GameConfig) {
 #[derive(Resource, Debug, Clone)]
 pub struct GameConfig {
     pub game: GameFile,
+    pub assets: AssetsFile,
     pub segments: SegmentsFile,
     pub backgrounds: BackgroundsFile,
     pub environments: EnvironmentsFile,
@@ -84,11 +85,16 @@ pub struct GameConfig {
     pub weapons_by_id: HashMap<String, WeaponConfig>,
     pub vehicles_by_id: HashMap<String, VehicleConfig>,
     pub upgrades_by_id: HashMap<String, UpgradeConfig>,
+    pub sprite_assets_by_id: HashMap<String, SpriteAssetConfig>,
+    pub model_assets_by_id: HashMap<String, ModelAssetConfig>,
+    pub splat_assets_by_id: HashMap<String, SplatAssetConfig>,
+    pub audio_assets_by_id: HashMap<String, AudioAssetConfig>,
 }
 
 impl GameConfig {
     pub fn load_from_dir(config_dir: &Path) -> Result<Self, ConfigError> {
         let game: GameFile = read_toml(&config_dir.join("game.toml"))?;
+        let assets: AssetsFile = read_toml(&config_dir.join("assets.toml"))?;
         let segments: SegmentsFile = read_toml(&config_dir.join("segments.toml"))?;
         let backgrounds: BackgroundsFile = read_toml(&config_dir.join("backgrounds.toml"))?;
         let environments: EnvironmentsFile = read_toml(&config_dir.join("environments.toml"))?;
@@ -100,6 +106,10 @@ impl GameConfig {
         let commentator: CommentatorFile = read_toml(&config_dir.join("commentator.toml"))?;
 
         let config = Self {
+            sprite_assets_by_id: to_index("assets.toml::sprites", &assets.sprites)?,
+            model_assets_by_id: to_index("assets.toml::models", &assets.models)?,
+            splat_assets_by_id: to_index("assets.toml::splats", &assets.splats)?,
+            audio_assets_by_id: to_index("assets.toml::audio", &assets.audio)?,
             backgrounds_by_id: to_index("backgrounds.toml::backgrounds", &backgrounds.backgrounds)?,
             environments_by_id: to_index(
                 "environments.toml::environments",
@@ -111,6 +121,7 @@ impl GameConfig {
             vehicles_by_id: to_index("vehicles.toml::vehicles", &vehicles.vehicles)?,
             upgrades_by_id: to_index("upgrades.toml::upgrades", &upgrades.upgrades)?,
             game,
+            assets,
             segments,
             backgrounds,
             environments,
@@ -195,6 +206,48 @@ impl GameConfig {
                 return Err(ConfigError::Validation(format!(
                     "vehicles.toml::vehicles[{index}].default_weapon_id references unknown weapon id `{}`",
                     vehicle.default_weapon_id
+                )));
+            }
+        }
+
+        for (index, sprite) in self.assets.sprites.iter().enumerate() {
+            if sprite.path.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "assets.toml::sprites[{index}].path cannot be empty"
+                )));
+            }
+        }
+
+        for (index, model) in self.assets.models.iter().enumerate() {
+            if model.scene_path.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "assets.toml::models[{index}].scene_path cannot be empty"
+                )));
+            }
+            if model.root_node.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "assets.toml::models[{index}].root_node cannot be empty"
+                )));
+            }
+            if model.wheel_nodes.is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "assets.toml::models[{index}].wheel_nodes must contain at least one node name"
+                )));
+            }
+        }
+
+        for (index, splat) in self.assets.splats.iter().enumerate() {
+            if splat.path.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "assets.toml::splats[{index}].path cannot be empty"
+                )));
+            }
+        }
+
+        for (index, audio) in self.assets.audio.iter().enumerate() {
+            if audio.path.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "assets.toml::audio[{index}].path cannot be empty"
                 )));
             }
         }
@@ -476,6 +529,69 @@ pub struct FallbackLines {
     pub lines: Vec<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AssetsFile {
+    #[serde(default)]
+    pub sprites: Vec<SpriteAssetConfig>,
+    #[serde(default)]
+    pub models: Vec<ModelAssetConfig>,
+    #[serde(default)]
+    pub splats: Vec<SplatAssetConfig>,
+    #[serde(default)]
+    pub audio: Vec<AudioAssetConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpriteAssetConfig {
+    pub id: String,
+    pub path: String,
+}
+
+impl HasId for SpriteAssetConfig {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ModelAssetConfig {
+    pub id: String,
+    pub scene_path: String,
+    pub root_node: String,
+    pub wheel_nodes: Vec<String>,
+    pub turret_node: Option<String>,
+}
+
+impl HasId for ModelAssetConfig {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SplatAssetConfig {
+    pub id: String,
+    pub path: String,
+}
+
+impl HasId for SplatAssetConfig {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AudioAssetConfig {
+    pub id: String,
+    pub path: String,
+}
+
+impl HasId for AudioAssetConfig {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,6 +607,7 @@ mod tests {
                     debug_overlay: true,
                 },
             },
+            assets: AssetsFile::default(),
             segments: SegmentsFile {
                 segment_sequence: vec![SegmentSequenceConfig {
                     id: "segment_a".to_string(),
@@ -681,6 +798,10 @@ mod tests {
                     label: "Damage+".to_string(),
                 },
             )]),
+            sprite_assets_by_id: HashMap::new(),
+            model_assets_by_id: HashMap::new(),
+            splat_assets_by_id: HashMap::new(),
+            audio_assets_by_id: HashMap::new(),
         };
 
         let error = config

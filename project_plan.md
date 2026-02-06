@@ -162,7 +162,10 @@ environment = "ice"
 ### 5.10 `config/commentator.toml`
 - thresholds for calling out: airtime, wheelie time, flip count, speed tier
 - rate limiting: min seconds between voice lines, priority rules
+- two commentator profiles (character IDs/style/voice settings + subtitle colors)
+- round-robin scheduler rules (which commentator speaks next)
 - template prompts + "style" settings
+- prompt context should include what the other commentator said last time
 - fallback lines (non-AI) if API fails
 
 ---
@@ -184,9 +187,9 @@ environment = "ice"
 - [done] A1. Bevy app scaffold (states: `Boot -> Loading -> InRun -> Pause -> Results`).
 - [done] A2. TOML loader + schema structs; validate references (enemy IDs, weapon IDs, env IDs).
 - [done] A3. Hot-reload (optional but high value): re-read TOML on keypress.
-- [not started] A4. Basic asset registry (sprites, placeholder polygons/boxes, audio placeholders).
-- [not started] A5. Minimal debug overlay (FPS, distance, active segment, enemy count).
-- [not started] A6. Commentary stub pipeline (event queue + debug text output, no network).
+- [done] A4. Basic asset registry (sprites, placeholder polygons/boxes, audio placeholders).
+- [done] A5. Minimal debug overlay (FPS, distance, active segment, enemy count).
+- [done] A6. Commentary stub pipeline (event queue + debug text output, no network).
 
 **DoD**
 - Running build loads configs, spawns player + a background segment, no panics, shows HUD/debug.
@@ -269,9 +272,11 @@ environment = "ice"
   - simple polygons/planes marking edges / floor framing (museum frame).
 - [not started] E6. Seam masking:
   - "door frame" quad at segment boundaries to hide discontinuity.
+- [not started] E7. Ground authoring pipeline:
+  - implement simple in-game editor mode OR import external spline files for drivable ground.
 
 **DoD**
-- You can traverse multiple segments seamlessly; environment changes are noticeable and stable.
+- You can traverse multiple segments seamlessly; environment changes are noticeable and stable; ground authoring/import path is usable.
 
 ---
 
@@ -304,22 +309,26 @@ environment = "ice"
 - [not started] G2. Event aggregation:
   - batch events into a compact "what happened" text summary.
   - de-duplicate spammy events; apply cooldowns and priorities.
+  - route lines in round-robin order between two commentators.
 - [not started] G3. Prompt builder:
   - include run context (segment name, score streak, player health).
+  - include what the other commentator said last time.
   - style knobs from `commentator.toml` (tone, length, profanity filter if desired).
 - [not started] G4. Neocortex API client:
-  - async request queue; cancellation (don't narrate stale moments).
+  - async request queue; cancellation (don't narrate stale moments); maintain per-commentator context/session.
   - retries with backoff; strict timeout.
 - [not started] G5. Audio decode & playback:
   - store response to file/memory; feed to Bevy audio.
   - duck SFX/music under narration.
 - [not started] G6. Fallback behavior:
   - if API fails/offline, play local canned VO lines or text captions.
-- [not started] G7. UI subtitle (optional but nice):
-  - show last line as captions; helps in noisy demo spaces and web autoplay restrictions.
+- [not started] G7. UI subtitles:
+  - draw returned chat message on screen.
+  - subtitle color must depend on which commentator spoke.
+  - show captions for both commentators in noisy demo spaces and web autoplay restrictions.
 
 **DoD**
-- Narrator reacts to stunts/kills/crashes with minimal latency and without spamming; game never stalls on API.
+- Two commentators react to stunts/kills/crashes in round-robin order with minimal latency and without spamming; colored subtitles identify the speaker; game never stalls on API.
 
 ---
 
@@ -371,6 +380,13 @@ environment = "ice"
 - Long-term splat strategy: use a vendored/patch-crate version of `bevy_gaussian_splatting v6.0.0` without the nightly-only `#![feature(lazy_type_alias)]` gate, so builds stay on stable toolchain.
 - A2 implementation detail: `config/*.toml` is now loaded/merged at startup with fail-fast validation for cross-file IDs (environment, weapon, enemy, vehicle, spawner).
 - A3 implementation detail: press `F5` in-game to hot-reload all `config/*.toml`; invalid reloads are rejected and previous in-memory config stays active.
+- A4 implementation detail: `assets.toml` now defines sprite/model/splat/audio catalogs; model entries include hierarchy metadata (`root_node`, `wheel_nodes`, optional `turret_node`) for vehicle-style compositions.
+- A5 implementation detail: debug HUD now shows FPS, distance, active segment, enemy count, and commentary queue status.
+- Debug overlay visibility detail: overlay text now uses Bevy default UI font fallback (no bundled font required), and `H` toggles a full keybind help panel.
+- A6 implementation detail: commentary stub queue is active with key-driven events (`J` big jump, `K` kill, `C` crash), zero network dependency.
+- Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
+- Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
+- Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.
 - Physics direction for later epics: bevy_rapier2d.
 - AI commentary in early milestones is stub-first; real Neocortex integration is a dedicated later task.
 - Neocortex request flow to use later: /api/v2/chat then /api/v2/audio/generate.

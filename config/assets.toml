@@ -1,0 +1,44 @@
+[[sprites]]
+id = "vehicle_starter_car_sprite"
+path = "sprites/vehicle_starter_car.png"
+
+[[sprites]]
+id = "enemy_grunt_sprite"
+path = "sprites/enemy_grunt.png"
+
+[[sprites]]
+id = "turret_base_sprite"
+path = "sprites/turret_base.png"
+
+[[models]]
+id = "vehicle_starter_car"
+scene_path = "models/vehicles/starter_car.glb#Scene0"
+root_node = "CarRoot"
+wheel_nodes = ["WheelFL", "WheelFR", "WheelRL", "WheelRR"]
+turret_node = "Turret"
+
+[[models]]
+id = "enemy_grunt_model"
+scene_path = "models/enemies/grunt.glb#Scene0"
+root_node = "GruntRoot"
+wheel_nodes = ["WheelDummy"]
+
+[[splats]]
+id = "museum_hall_01"
+path = "splats/museum_hall_01.gcloud"
+
+[[splats]]
+id = "garage_alley_01"
+path = "splats/garage_alley_01.gcloud"
+
+[[audio]]
+id = "sfx_player_shot"
+path = "audio/sfx/player_shot.ogg"
+
+[[audio]]
+id = "sfx_enemy_shot"
+path = "audio/sfx/enemy_shot.ogg"
+
+[[audio]]
+id = "sfx_hit"
+path = "audio/sfx/hit.ogg"
