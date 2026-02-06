@@ -1,0 +1,368 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::{anyhow, bail, Context, Result};
+use serde::{Deserialize, Serialize};
+
+const DEFAULT_API_BASE_URL: &str = "https://neocortex.link";
+const DEFAULT_CHARACTER_ID: &str = "cmlarc6fv0003l404isl4cdxl";
+const DEFAULT_VOICE_EMOTION: &str = "AMAZED";
+
+const USAGE: &str = "\
+Neocortex chat-to-voice prototype
+
+Usage:
+  cargo run -- [options]
+
+Options:
+  --text, -t <text>         User message to send to character chat
+  --api-key <key>           Neocortex API key (or use NEOCORTEX_API_KEY env var)
+  --character <id>          Character ID (default: cmlarc6fv0003l404isl4cdxl)
+  --session-id <id>         Optional existing chat session ID
+  --emotion <name>          Voice emotion for TTS (default: AMAZED)
+  --format <mp3|wav>        Output format (default: mp3)
+  --output <path>           Output file path (default: out/speech-<ts>.<format>)
+  --api-base-url <url>      API base URL (default: https://neocortex.link)
+  --no-play                 Skip opening output audio in default player
+  --help, -h                Show this help";
+
+#[derive(Debug, Clone, Copy)]
+enum AudioFormat {
+    Mp3,
+    Wav,
+}
+
+impl AudioFormat {
+    fn parse(input: &str) -> Result<Self> {
+        match input {
+            "mp3" => Ok(Self::Mp3),
+            "wav" => Ok(Self::Wav),
+            other => bail!("unsupported format `{other}`; expected `mp3` or `wav`"),
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            AudioFormat::Mp3 => "mp3",
+            AudioFormat::Wav => "wav",
+        }
+    }
+}
+
+struct Args {
+    text: String,
+    api_key: String,
+    character: String,
+    session_id: Option<String>,
+    emotion: String,
+    format: AudioFormat,
+    output: Option<PathBuf>,
+    no_play: bool,
+    api_base_url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatRequest<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<&'a str>,
+    character_id: &'a str,
+    message: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatResponse {
+    session_id: Option<String>,
+    response: String,
+    action: Option<String>,
+    emotion: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GenerateSpeechRequest<'a> {
+    character_id: &'a str,
+    message: &'a str,
+    emotion: &'a str,
+    format: &'a str,
+}
+
+fn main() -> Result<()> {
+    let args = parse_args()?;
+
+    let output_path = args
+        .output
+        .unwrap_or_else(|| default_output_path(args.format.as_str()));
+
+    let chat_url = format!("{}/api/v2/chat", args.api_base_url.trim_end_matches('/'));
+    let generate_url = format!(
+        "{}/api/v2/audio/generate",
+        args.api_base_url.trim_end_matches('/')
+    );
+
+    let chat_body = ChatRequest {
+        session_id: args.session_id.as_deref(),
+        character_id: &args.character,
+        message: &args.text,
+    };
+
+    println!("Sending chat message...");
+    let chat_payload =
+        serde_json::to_string(&chat_body).context("failed to serialize chat payload")?;
+    let (chat_status, chat_response_body) =
+        run_curl_json_post(&chat_url, &chat_payload, &args.api_key)?;
+    if !(200..300).contains(&chat_status) {
+        bail!(
+            "Chat API returned HTTP {chat_status}: {}",
+            truncate(&chat_response_body, 500)
+        );
+    }
+
+    let chat_response: ChatResponse =
+        serde_json::from_str(&chat_response_body).with_context(|| {
+            format!(
+                "failed to decode chat response: {}",
+                truncate(&chat_response_body, 500)
+            )
+        })?;
+
+    if let Some(session_id) = chat_response.session_id.as_deref() {
+        println!("Session ID: {session_id}");
+    }
+    if let Some(emotion) = chat_response.emotion.as_deref() {
+        println!("Emotion: {emotion}");
+    }
+    if let Some(action) = chat_response.action.as_deref() {
+        if !action.is_empty() {
+            println!("Action: {action}");
+        }
+    }
+    println!("Character reply: {}", chat_response.response);
+
+    let tts_body = GenerateSpeechRequest {
+        character_id: &args.character,
+        message: &chat_response.response,
+        emotion: &args.emotion,
+        format: args.format.as_str(),
+    };
+
+    println!("Generating speech...");
+    println!("Voice emotion: {}", args.emotion);
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create output dir {}", parent.display()))?;
+    }
+
+    let payload =
+        serde_json::to_string(&tts_body).context("failed to serialize generate payload")?;
+    let output_str = output_path.to_string_lossy().to_string();
+    let raw_status_code = run_curl_capture_stdout(&[
+        "-sS",
+        "-L",
+        "-X",
+        "POST",
+        &generate_url,
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        &format!("x-api-key: {}", args.api_key),
+        "--data-raw",
+        &payload,
+        "--output",
+        &output_str,
+        "-w",
+        "%{http_code}",
+    ])?;
+
+    let http_code = raw_status_code
+        .trim()
+        .parse::<u16>()
+        .context("failed to parse HTTP status code from curl response")?;
+    if !(200..300).contains(&http_code) {
+        let error_body = fs::read_to_string(&output_path).unwrap_or_default();
+        let preview = truncate(&error_body, 500);
+        let _ = fs::remove_file(&output_path);
+        bail!("API returned HTTP {http_code}: {preview}");
+    }
+
+    println!("Saved audio to {}", output_path.display());
+
+    if !args.no_play {
+        play_audio_file(&output_path)?;
+    }
+
+    Ok(())
+}
+
+fn default_output_path(extension: &str) -> PathBuf {
+    let unix_ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    PathBuf::from(format!("out/speech-{}.{}", unix_ts, extension))
+}
+
+fn play_audio_file(path: &Path) -> Result<()> {
+    println!("Opening audio in the default media player...");
+
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", &path.display().to_string()])
+            .spawn()
+            .context("failed to launch default media player")?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(path)
+            .spawn()
+            .context("failed to launch default media player")?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .context("failed to launch default media player")?;
+    }
+
+    Ok(())
+}
+
+fn parse_args() -> Result<Args> {
+    let mut text = String::from("Hello from Neocortex text to speech.");
+    let mut api_key = std::env::var("NEOCORTEX_API_KEY").ok();
+    let mut character = String::from(DEFAULT_CHARACTER_ID);
+    let mut session_id: Option<String> = None;
+    let mut emotion = String::from(DEFAULT_VOICE_EMOTION);
+    let mut format = AudioFormat::Mp3;
+    let mut output: Option<PathBuf> = None;
+    let mut no_play = false;
+    let mut api_base_url = String::from(DEFAULT_API_BASE_URL);
+
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--help" | "-h" => {
+                println!("{USAGE}");
+                std::process::exit(0);
+            }
+            "--text" | "-t" => {
+                text = args
+                    .next()
+                    .ok_or_else(|| anyhow!("missing value for --text"))?;
+            }
+            "--api-key" => {
+                api_key = Some(
+                    args.next()
+                        .ok_or_else(|| anyhow!("missing value for --api-key"))?,
+                );
+            }
+            "--character" => {
+                character = args
+                    .next()
+                    .ok_or_else(|| anyhow!("missing value for --character"))?;
+            }
+            "--session-id" => {
+                session_id = Some(
+                    args.next()
+                        .ok_or_else(|| anyhow!("missing value for --session-id"))?,
+                );
+            }
+            "--emotion" => {
+                emotion = args
+                    .next()
+                    .ok_or_else(|| anyhow!("missing value for --emotion"))?;
+            }
+            "--format" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| anyhow!("missing value for --format"))?;
+                format = AudioFormat::parse(&value)?;
+            }
+            "--output" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| anyhow!("missing value for --output"))?;
+                output = Some(PathBuf::from(value));
+            }
+            "--no-play" => {
+                no_play = true;
+            }
+            "--api-base-url" => {
+                api_base_url = args
+                    .next()
+                    .ok_or_else(|| anyhow!("missing value for --api-base-url"))?;
+            }
+            _ => bail!("unknown option `{arg}`\n\n{USAGE}"),
+        }
+    }
+
+    let api_key =
+        api_key.ok_or_else(|| anyhow!("missing API key: set --api-key or NEOCORTEX_API_KEY"))?;
+    Ok(Args {
+        text,
+        api_key,
+        character,
+        session_id,
+        emotion,
+        format,
+        output,
+        no_play,
+        api_base_url,
+    })
+}
+
+fn run_curl_capture_stdout(args: &[&str]) -> Result<String> {
+    let output = Command::new("curl.exe")
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to execute curl.exe with args: {args:?}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("curl command failed: {stderr}");
+    }
+
+    String::from_utf8(output.stdout).context("curl output was not valid UTF-8")
+}
+
+fn run_curl_json_post(url: &str, payload_json: &str, api_key: &str) -> Result<(u16, String)> {
+    let status_marker = "__HTTP_STATUS__:";
+    let raw_output = run_curl_capture_stdout(&[
+        "-sS",
+        "-L",
+        "-X",
+        "POST",
+        url,
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        &format!("x-api-key: {api_key}"),
+        "--data-raw",
+        payload_json,
+        "-w",
+        &format!("\n{status_marker}%{{http_code}}"),
+    ])?;
+
+    let marker_index = raw_output
+        .rfind(status_marker)
+        .ok_or_else(|| anyhow!("missing HTTP status marker in curl output"))?;
+    let (body, status_part) = raw_output.split_at(marker_index);
+    let status_code = status_part[status_marker.len()..]
+        .trim()
+        .parse::<u16>()
+        .context("failed to parse HTTP status code from curl output")?;
+
+    Ok((status_code, body.trim().to_string()))
+}
+
+fn truncate(input: &str, max_chars: usize) -> String {
+    input.chars().take(max_chars).collect()
+}

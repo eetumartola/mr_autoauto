@@ -1,25 +1,25 @@
-# Mr. Autoauto — Project Plan (Bevy + Splats + AI Commentator)
+# Mr. Autoauto - Project Plan (Bevy + Splats + AI Commentator)
 
 ## 0) One-paragraph pitch
-**Mr. Autoauto** is a side-scrolling Hill Climb–style driving action game: you control a vehicle with **two buttons** (accelerate / brake; in-air rotate CCW/CW). You drive across a 2D physics plane while a turret **auto-fires** at enemies (Mr Autofire vibe). Levels are made from **concatenated linear Gaussian Splat background segments**. A runtime **AI commentator** (Neocortex Web API) narrates stunts and combat based on real game events (big jumps, wheelies, kills, crashes, speed milestones).
+**Mr. Autoauto** is a side-scrolling Hill Climb-style driving action game: you control a vehicle with **two buttons** (accelerate / brake; in-air rotate CCW/CW). You drive across a 2D physics plane while a turret **auto-fires** at enemies (Mr Autofire vibe). Levels are made from **concatenated linear Gaussian Splat background segments**. A runtime **AI commentator** (Neocortex Web API) narrates stunts and combat based on real game events (big jumps, wheelies, kills, crashes, speed milestones).
 
 **Core design goal:** ship a stable, fun, readable loop fast, and keep the game continuously playable while layering in content and polish.
 
 ---
 
 ## 1) Core gameplay loop
-### Moment-to-moment (10–30 seconds)
+### Moment-to-moment (10-30 seconds)
 - Drive forward across terrain: throttle/brake, manage pitch in air.
 - Auto-turret engages enemies in front/around the vehicle.
 - Dodge projectiles + terrain hazards; maintain speed.
 - Perform stunts (air time, wheelies, flips) for score multipliers / pickups.
 - AI commentator reacts to meaningful events.
 
-### Run-to-run (2–5 minutes)
+### Run-to-run (2-5 minutes)
 - Progress through a sequence of splat background segments.
 - Difficulty escalates with distance and segment type.
 - Periodic mini-boss / boss encounters.
-- Earn coins/score → pick upgrades (weapon/vehicle perks).
+- Earn coins/score -> pick upgrades (weapon/vehicle perks).
 
 ### Meta (hackathon scope)
 - Minimal persistence: last run stats, high score, optionally unlocked upgrades.
@@ -45,6 +45,12 @@
   - enemy types + spawners
   - weapons/vehicles/upgrades
   - AI commentator rules and thresholds
+- Engine target: **Bevy 0.17**
+- Splat renderer target: **bevy_gaussian_splatting v6.0**
+- Physics backend target (Epic B+): **bevy_rapier2d** (mature 2D joints + collisions; start simple, then add wheel/suspension behavior)
+- Input defaults: A/D and Left/Right
+- No splat assets yet: use simple polygon/box background placeholders until assets arrive.
+- AI commentary implementation plan: ship a local stub first; wire real Neocortex chat->audio API later in Epic G.
 
 ---
 
@@ -78,7 +84,7 @@
 - `AssetRegistry` (loaded splats, sprites, sounds)
 
 ### Core system groups (recommended ordering)
-1. Input → `InputState`
+1. Input -> `InputState`
 2. Vehicle physics & terrain contact
 3. Enemy + spawner updates
 4. Turret targeting + firing
@@ -124,7 +130,7 @@ environment = "ice"
 
 ### 5.4 `config/environments.toml`
 - `gravity`, `drag`, `traction`, `air_control`, `wheel_friction`, `projectile_drag`
-- also “style” knobs: dust amount, impact FX intensity
+- also "style" knobs: dust amount, impact FX intensity
 
 ### 5.5 `config/enemy_types.toml`
 - health, speed, contact damage
@@ -156,43 +162,49 @@ environment = "ice"
 ### 5.10 `config/commentator.toml`
 - thresholds for calling out: airtime, wheelie time, flip count, speed tier
 - rate limiting: min seconds between voice lines, priority rules
-- template prompts + “style” settings
+- template prompts + "style" settings
 - fallback lines (non-AI) if API fails
 
 ---
 
 ## 6) Epics and initial task list
 
+### Task status legend
+- [not started] not implemented yet.
+- [in progress] currently being worked on.
+- [blocked] waiting for dependency/decision.
+- [done] implemented and validated.
 > **Principle:** every epic should keep the game runnable and fun at each step.  
-> Each epic has “Definition of Done” (DoD) so you can cut scope cleanly.
+> Each epic has "Definition of Done" (DoD) so you can cut scope cleanly.
 
-### Epic A — Project skeleton & config loading
+### Epic A - Project skeleton & config loading
 **Goal:** boot to a playable scene with config-driven entities.
 
 **Tasks**
-- A1. Bevy app scaffold (states: `Boot → Loading → InRun → Pause → Results`).
-- A2. TOML loader + schema structs; validate references (enemy IDs, weapon IDs, env IDs).
-- A3. Hot-reload (optional but high value): re-read TOML on keypress.
-- A4. Basic asset registry (sprites, splats, audio placeholders).
-- A5. Minimal debug overlay (FPS, distance, active segment, enemy count).
+- [done] A1. Bevy app scaffold (states: `Boot -> Loading -> InRun -> Pause -> Results`).
+- [not started] A2. TOML loader + schema structs; validate references (enemy IDs, weapon IDs, env IDs).
+- [not started] A3. Hot-reload (optional but high value): re-read TOML on keypress.
+- [not started] A4. Basic asset registry (sprites, placeholder polygons/boxes, audio placeholders).
+- [not started] A5. Minimal debug overlay (FPS, distance, active segment, enemy count).
+- [not started] A6. Commentary stub pipeline (event queue + debug text output, no network).
 
 **DoD**
 - Running build loads configs, spawns player + a background segment, no panics, shows HUD/debug.
 
 ---
 
-### Epic B — Vehicle controller (Hill Climb core)
-**Goal:** two-button driving feels “good enough” quickly; physics is stable.
+### Epic B - Vehicle controller (Hill Climb core)
+**Goal:** two-button driving feels "good enough" quickly; physics is stable.
 
 **Tasks**
-- B1. Input mapping (keyboard + gamepad optional; touch overlay for web optional).
-- B2. Vehicle kinematics v0:
+- [not started] B1. Input mapping (keyboard + gamepad optional; touch overlay for web optional).
+- [not started] B2. Vehicle kinematics v0:
   - integrate velocity, gravity, clamp, basic ground collision with flat ground
   - grounded vs airborne state
-- B3. In-air rotation controls (CCW/CW based on accel/brake).
-- B4. Camera follow (look-ahead based on speed; fixed z).
-- B5. Terrain v1 placeholder: simple height function (sine/ramps) from config.
-- B6. Stunt metrics:
+- [not started] B3. In-air rotation controls (CCW/CW based on accel/brake).
+- [not started] B4. Camera follow (look-ahead based on speed; fixed z).
+- [not started] B5. Terrain v1 placeholder: simple height function (sine/ramps) from config.
+- [not started] B6. Stunt metrics:
   - airtime, wheelie timer, flip detection, max speed, crash detection.
 
 **DoD**
@@ -200,41 +212,41 @@ environment = "ice"
 
 ---
 
-### Epic C — Combat: turret, bullets/missiles, hits
-**Goal:** Mr Autofire-style “auto shoots and feels punchy.”
+### Epic C - Combat: turret, bullets/missiles, hits
+**Goal:** Mr Autofire-style "auto shoots and feels punchy."
 
 **Tasks**
-- C1. Turret targeting:
+- [not started] C1. Turret targeting:
   - select nearest enemy within cone/range; configurable prioritization (nearest/strongest).
-- C2. Firing logic:
+- [not started] C2. Firing logic:
   - fire rate, burst/spread, projectile spawn offsets.
-- C3. Projectile simulation:
+- [not started] C3. Projectile simulation:
   - bullet: straight + optional drag
   - missile: ballistic + optional homing (bounded turn rate)
-- C4. Collision & damage:
+- [not started] C4. Collision & damage:
   - simple circle/box overlap (2D), friendly-fire rules, hitstop optional.
-- C5. Effects v0:
+- [not started] C5. Effects v0:
   - tracer sprite, impact sprite, enemy hit flash, simple explosion quad
-- C6. Audio SFX placeholders (gun, hit, explosion) with volume ducking under narration.
+- [not started] C6. Audio SFX placeholders (gun, hit, explosion) with volume ducking under narration.
 
 **DoD**
 - Shooting reliably hits enemies, feedback is readable, and performance stays stable with moderate projectile counts.
 
 ---
 
-### Epic D — Enemies & spawners (content without code edits)
+### Epic D - Enemies & spawners (content without code edits)
 **Goal:** enemies spawn from data and create pressure.
 
 **Tasks**
-- D1. Enemy “quad” renderer + hitbox.
-- D2. Enemy behaviors v0 (config-driven):
+- [not started] D1. Enemy "quad" renderer + hitbox.
+- [not started] D2. Enemy behaviors v0 (config-driven):
   - Walker (ground), Flier (sine hover), Turret (stationary shooter), Charger.
-- D3. Enemy shooting patterns (simple): aimed shots, arcs, spreads.
-- D4. Spawner system:
+- [not started] D3. Enemy shooting patterns (simple): aimed shots, arcs, spreads.
+- [not started] D4. Spawner system:
   - distance-based triggers, timed spawns, max alive, cooldown.
-- D5. Difficulty scaling:
+- [not started] D5. Difficulty scaling:
   - scale spawn rate/health/damage with distance and per-segment multiplier.
-- D6. Boss v0:
+- [not started] D6. Boss v0:
   - big enemy with phases: spawn adds, fire pattern, weak spot (optional).
 
 **DoD**
@@ -242,68 +254,68 @@ environment = "ice"
 
 ---
 
-### Epic E — Background segments + streaming + environment modifiers
+### Epic E - Background segments + streaming + environment modifiers
 **Goal:** splat segments are first-class gameplay segments, concatenated linearly.
 
 **Tasks**
-- E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
-- E2. Segment placement:
-  - concatenate along +x; maintain a “segment cursor” at current distance.
-- E3. Streaming:
+- [not started] E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
+- [not started] E2. Segment placement:
+  - concatenate along +x; maintain a "segment cursor" at current distance.
+- [not started] E3. Streaming:
   - load next N segments ahead; unload behind to cap memory.
-- E4. Environment application:
+- [not started] E4. Environment application:
   - when segment is active, apply gravity/drag/traction modifiers smoothly (lerp).
-- E5. Segment “props” v0:
+- [not started] E5. Segment "props" v0:
   - simple polygons/planes marking edges / floor framing (museum frame).
-- E6. Seam masking:
-  - “door frame” quad at segment boundaries to hide discontinuity.
+- [not started] E6. Seam masking:
+  - "door frame" quad at segment boundaries to hide discontinuity.
 
 **DoD**
 - You can traverse multiple segments seamlessly; environment changes are noticeable and stable.
 
 ---
 
-### Epic F — Scoring, coins, upgrades, and run flow
+### Epic F - Scoring, coins, upgrades, and run flow
 **Goal:** simple progression that makes replay meaningful.
 
 **Tasks**
-- F1. Score sources:
-  - distance, kills, stunts (airtime/wheelie/flip), “no damage” bonus.
-- F2. Currency drops (coins/parts).
-- F3. Upgrade selection UI:
-  - after boss / at checkpoints / on level-up, present 2–3 choices.
-- F4. Upgrade application system:
+- [not started] F1. Score sources:
+  - distance, kills, stunts (airtime/wheelie/flip), "no damage" bonus.
+- [not started] F2. Currency drops (coins/parts).
+- [not started] F3. Upgrade selection UI:
+  - after boss / at checkpoints / on level-up, present 2-3 choices.
+- [not started] F4. Upgrade application system:
   - modify weapon/vehicle params; stack rules.
-- F5. Run end conditions:
+- [not started] F5. Run end conditions:
   - health hits 0; show results screen with summary + restart.
-- F6. High score persistence (local file; for web use local storage if available later).
+- [not started] F6. High score persistence (local file; for web use local storage if available later).
 
 **DoD**
-- A full run has an arc: start → escalation → upgrades → fail/win → summary → restart quickly.
+- A full run has an arc: start -> escalation -> upgrades -> fail/win -> summary -> restart quickly.
 
 ---
 
-### Epic G — AI commentator integration (Neocortex Web API)
+### Epic G - AI commentator integration (Neocortex Web API)
 **Goal:** narrator is reliable, rate-limited, and clearly reactive to gameplay.
 
 **Tasks**
-- G1. Event model:
+- [not started] G1. Event model:
   - `GameEvent` enum (JumpBig, WheelieLong, Flip, Kill, BossKill, Crash, SpeedTier, NearDeath, Streak).
-- G2. Event aggregation:
-  - batch events into a compact “what happened” text summary.
+- [not started] G2. Event aggregation:
+  - batch events into a compact "what happened" text summary.
   - de-duplicate spammy events; apply cooldowns and priorities.
-- G3. Prompt builder:
+- [not started] G3. Prompt builder:
   - include run context (segment name, score streak, player health).
   - style knobs from `commentator.toml` (tone, length, profanity filter if desired).
-- G4. Neocortex API client:
-  - async request queue; cancellation (don’t narrate stale moments).
+- [not started] G4. Neocortex API client:
+  - async request queue; cancellation (don't narrate stale moments).
   - retries with backoff; strict timeout.
-- G5. Audio decode & playback:
+- [not started] G5. Audio decode & playback:
   - store response to file/memory; feed to Bevy audio.
   - duck SFX/music under narration.
-- G6. Fallback behavior:
+- [not started] G6. Fallback behavior:
   - if API fails/offline, play local canned VO lines or text captions.
-- G7. UI subtitle (optional but nice):
+- [not started] G7. UI subtitle (optional but nice):
   - show last line as captions; helps in noisy demo spaces and web autoplay restrictions.
 
 **DoD**
@@ -311,85 +323,100 @@ environment = "ice"
 
 ---
 
-### Epic H — UI/UX polish and “Supercell demo readiness”
+### Epic H - UI/UX polish and "Supercell demo readiness"
 **Goal:** the game reads instantly to judges.
 
 **Tasks**
-- H1. Title screen + quick start.
-- H2. HUD: health, distance, speed, score, upgrade icons, current segment label.
-- H3. Hit indicators (directional damage, screen shake light).
-- H4. Feedback polish:
+- [not started] H1. Title screen + quick start.
+- [not started] H2. HUD: health, distance, speed, score, upgrade icons, current segment label.
+- [not started] H3. Hit indicators (directional damage, screen shake light).
+- [not started] H4. Feedback polish:
   - muzzle flash, screen shake on big hits, dust on landing, coin pickup sparkle.
-- H5. Audio mix:
+- [not started] H5. Audio mix:
   - music bed loop; mix levels; narration ducking.
-- H6. Controller / touch affordances:
+- [not started] H6. Controller / touch affordances:
   - on-screen buttons + haptics (optional).
 
 **DoD**
-- A first-time player understands controls in <10 seconds and sees the “AI commentator” clearly.
+- A first-time player understands controls in <10 seconds and sees the "AI commentator" clearly.
 
 ---
 
-### Epic I — Web build (optional epic; can be dropped)
+### Epic I - Web build (optional epic; can be dropped)
 **Goal:** deliver WASM build with acceptable performance.
 
 **Tasks**
-- I1. Web-compatible asset loading paths.
-- I2. Touch input UI and pointer capture.
-- I3. Audio autoplay policy handling:
+- [not started] I1. Web-compatible asset loading paths.
+- [not started] I2. Touch input UI and pointer capture.
+- [not started] I3. Audio autoplay policy handling:
   - require first user tap to enable audio; show prompt.
-- I4. Networking constraints:
+- [not started] I4. Networking constraints:
   - CORS setup for Neocortex endpoint; API key injection strategy.
-- I5. Performance knobs:
+- [not started] I5. Performance knobs:
   - cap projectiles; lower splat detail; reduce FX.
-- I6. Build pipeline:
+- [not started] I6. Build pipeline:
   - `wasm32-unknown-unknown` + bundling + simple hosting script.
 
 **DoD**
-- The web build runs, controls work, narration works after user gesture, and framerate is “demoable.”
+- The web build runs, controls work, narration works after user gesture, and framerate is "demoable."
 
 ---
 
-## 7) Recommended build sequence (milestones)
-This is a suggested order that keeps “always playable”:
+## 6.1) Decisions log (2026-02-06)
+- Start implementation scope with Epic A only.
+- Placeholder backgrounds are required now (simple quads/polygons), not real splat content yet.
+- Version pinning: Bevy 0.17 and bevy_gaussian_splatting v6.0.
+- Rust toolchain pinning for Bevy 0.17 compatibility: `rustc/cargo 1.88.0`.
+- `bevy_gaussian_splatting v6.0` currently requires nightly Rust when compiled; keep it feature-gated (`gaussian_splats`) and disabled for now.
+- Long-term splat strategy: use a vendored/patch-crate version of `bevy_gaussian_splatting v6.0.0` without the nightly-only `#![feature(lazy_type_alias)]` gate, so builds stay on stable toolchain.
+- Physics direction for later epics: bevy_rapier2d.
+- AI commentary in early milestones is stub-first; real Neocortex integration is a dedicated later task.
+- Neocortex request flow to use later: /api/v2/chat then /api/v2/audio/generate.
+- Initial controls are keyboard A/D and Left/Right.
+- Preferred narrator audio format for easiest playback: wav (fallback mp3 if needed).
+- `reference/voice_api_example.txt` was repaired and can be used as the API integration reference.
 
-### Milestone 1 — Playable driving slice
+---
+## 7) Recommended build sequence (milestones)
+This is a suggested order that keeps "always playable":
+
+### Milestone 1 - Playable driving slice
 - Epic A (minimum) + Epic B (v0) + straight ground + placeholder background.
 
-### Milestone 2 — Combat and one enemy
+### Milestone 2 - Combat and one enemy
 - Epic C (v0) + Epic D (one enemy type, simple spawner).
 
-### Milestone 3 — Segments and progression
+### Milestone 3 - Segments and progression
 - Epic E (segment concatenation + seam masking) + Epic F (score/run flow).
 
-### Milestone 4 — AI commentator is “the feature”
+### Milestone 4 - AI commentator is "the feature"
 - Epic G end-to-end; add subtitles + debug panel to show emitted events.
 
-### Milestone 5 — Content + polish
-- Expand enemy roster, add boss, add 5–10 segment configs, upgrade variety.
+### Milestone 5 - Content + polish
+- Expand enemy roster, add boss, add 5-10 segment configs, upgrade variety.
 - UI/audio polish (Epic H).
 
-### Milestone 6 — Web (only if stable)
+### Milestone 6 - Web (only if stable)
 - Epic I as a final pass.
 
 ---
 
 ## 8) Risks & mitigations
 ### R1: Vehicle physics feels bad / unstable
-- Mitigation: start with a **simple rigidbody** + ground normal + traction; postpone “true wheel suspension.”
+- Mitigation: start with a **simple rigidbody** + ground normal + traction; postpone "true wheel suspension."
 - Add clamped angular velocity and forgiving landing logic.
 
 ### R2: Splat rendering too heavy
 - Mitigation: treat splats as **background-only**; keep them static; reduce point count / LOD.
-- Keep a “2D fallback background” path to avoid blocking gameplay.
+- Keep a "2D fallback background" path to avoid blocking gameplay.
 
 ### R3: AI narration latency / spam / failure
 - Mitigation: strict cooldowns + priority queue + cancellation of stale requests.
 - Always have fallback canned VO + subtitle text.
-- Never block the main thread; narration should be “best effort.”
+- Never block the main thread; narration should be "best effort."
 
 ### R4: Web build audio/network issues
-- Mitigation: ship desktop first; web only if it’s stable.
+- Mitigation: ship desktop first; web only if it's stable.
 - Require user click for audio; show clear UI.
 
 ### R5: Data-driven complexity slows iteration
@@ -399,10 +426,10 @@ This is a suggested order that keeps “always playable”:
 
 ## 9) Debug & telemetry (high leverage)
 - On-screen event log: last 10 `GameEvent`s with timestamps.
-- “Physics debug” toggle: show ground normal, contact point, vehicle center of mass.
+- "Physics debug" toggle: show ground normal, contact point, vehicle center of mass.
 - Spawner debug: show upcoming spawns along distance line.
 - Narration debug: show:
-  - queued events → built summary → request status → audio playback.
+  - queued events -> built summary -> request status -> audio playback.
 
 ---
 
@@ -445,14 +472,14 @@ mr_autoauto/
 
 ---
 
-## 11) Minimal “Day 0” implementation checklist (first runnable slice)
+## 11) Minimal "Day 0" implementation checklist (first runnable slice)
 - Spawn player quad at origin.
 - Straight ground collision.
 - Two-button accelerate/brake + in-air rotate.
 - Auto-turret firing bullets forward.
 - One enemy spawns ahead and can be killed.
 - Score increments on distance + kill.
-- AI commentator receives at least: `Kill`, `BigJump`, `Crash`, and plays audio.
+- AI commentator stub receives at least: `Kill`, `BigJump`, `Crash`, and shows debug text (network/audio wiring is deferred).
 
 ---
 
@@ -462,10 +489,12 @@ mr_autoauto/
 - Progress: `SegmentEntered(id)`, `UpgradeChosen(id)`, `MilestoneDistance(d)`
 
 Use `commentator.toml` to:
-- define thresholds for “big” vs “small” jumps
+- define thresholds for "big" vs "small" jumps
 - rate-limit each class of callout
 - define priorities (BossKill > NearDeath > BigJump > Kill)
 
 ---
 
-*This plan is intentionally “cuttable”: if something threatens stability, drop Web epic, drop missiles, drop boss phases, keep the core drive+shoot loop and the AI commentator shining.*
+*This plan is intentionally "cuttable": if something threatens stability, drop Web epic, drop missiles, drop boss phases, keep the core drive+shoot loop and the AI commentator shining.*
+
+
