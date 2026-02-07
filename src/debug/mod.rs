@@ -319,16 +319,83 @@ fn update_debug_overlay_text(
         .map(|state| (state.accelerate, state.brake))
         .unwrap_or((false, false));
 
-    let (queue_len, last_line) = match commentary {
-        Some(state) => (
-            state.queue.len(),
-            if state.last_line.is_empty() {
+    let (
+        queue_len,
+        last_line,
+        pending_speaker,
+        pending_chat_emotion,
+        pending_voice_emotion,
+        next_summary,
+        prompt_preview,
+        commentary_api_status,
+        commentary_audio_path,
+    ) = match commentary {
+        Some(state) => {
+            let line = if state.last_line.is_empty() {
+                "n/a".to_string()
+            } else if state.last_speaker.is_empty() {
+                state.last_line.clone()
+            } else {
+                format!("{}: {}", state.last_speaker, state.last_line)
+            };
+            let pending_speaker = if state.pending_speaker_id.is_empty() {
                 "n/a".to_string()
             } else {
-                state.last_line.clone()
-            },
+                state.pending_speaker_id.clone()
+            };
+            let chat_emotion = if state.pending_chat_emotion.is_empty() {
+                "n/a".to_string()
+            } else {
+                state.pending_chat_emotion.clone()
+            };
+            let voice_emotion = if state.pending_voice_emotion.is_empty() {
+                "n/a".to_string()
+            } else {
+                state.pending_voice_emotion.clone()
+            };
+            let summary = if state.pending_summary_preview.is_empty() {
+                "n/a".to_string()
+            } else {
+                truncate_for_overlay(&state.pending_summary_preview, 180)
+            };
+            let prompt = if state.pending_prompt_preview.is_empty() {
+                "n/a".to_string()
+            } else {
+                truncate_for_overlay(&state.pending_prompt_preview, 220)
+            };
+            let api_status = if state.api_status.is_empty() {
+                "n/a".to_string()
+            } else {
+                truncate_for_overlay(&state.api_status, 120)
+            };
+            let audio_path = if state.last_audio_path.is_empty() {
+                "n/a".to_string()
+            } else {
+                truncate_for_overlay(&state.last_audio_path, 120)
+            };
+            (
+                state.queue.len(),
+                line,
+                pending_speaker,
+                chat_emotion,
+                voice_emotion,
+                summary,
+                prompt,
+                api_status,
+                audio_path,
+            )
+        }
+        None => (
+            0,
+            "n/a".to_string(),
+            "n/a".to_string(),
+            "n/a".to_string(),
+            "n/a".to_string(),
+            "n/a".to_string(),
+            "n/a".to_string(),
+            "n/a".to_string(),
+            "n/a".to_string(),
         ),
-        None => (0, "n/a".to_string()),
     };
 
     let (airtime_cur, airtime_best, wheelie_best, flip_count, crash_count, max_speed, last_impact) =
@@ -346,7 +413,7 @@ fn update_debug_overlay_text(
         };
 
     *text = Text::new(format!(
-        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2})\nWheelie Best: {wheelie_best:>4.2}s | Flips: {flips} | Crashes: {crashes}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nLast Commentary: {last_line}\nHotkeys: H help | V vehicle tune | F5 reload config | J big jump | K kill | C crash",
+        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2})\nWheelie Best: {wheelie_best:>4.2}s | Flips: {flips} | Crashes: {crashes}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nCommentary Pending Speaker: {pending_speaker}\nCommentary Pending Emotions: chat={pending_chat_emotion} voice={pending_voice_emotion}\nCommentary Next Summary: {next_summary}\nCommentary Prompt Preview: {prompt_preview}\nCommentary API: {commentary_api_status}\nCommentary Audio File: {commentary_audio_path}\nLast Commentary: {last_line}\nHotkeys: H help | V vehicle tune | F5 reload config | J big jump | K kill | C crash",
         distance = run_stats.distance_m,
         player_x = player_x,
         speed = run_stats.speed_mps,
@@ -361,7 +428,23 @@ fn update_debug_overlay_text(
         max_speed = max_speed,
         impact = last_impact,
         segment = run_stats.active_segment_id,
+        pending_speaker = pending_speaker,
+        pending_chat_emotion = pending_chat_emotion,
+        pending_voice_emotion = pending_voice_emotion,
+        next_summary = next_summary,
+        prompt_preview = prompt_preview,
+        commentary_api_status = commentary_api_status,
+        commentary_audio_path = commentary_audio_path,
     ));
+}
+
+fn truncate_for_overlay(value: &str, max_chars: usize) -> String {
+    let cleaned = value.replace('\n', " ");
+    if cleaned.chars().count() <= max_chars {
+        return cleaned;
+    }
+    let truncated: String = cleaned.chars().take(max_chars.saturating_sub(1)).collect();
+    format!("{truncated}...")
 }
 
 fn toggle_keybind_overlay(

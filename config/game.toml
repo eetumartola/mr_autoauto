@@ -8,6 +8,13 @@ debug_overlay = true
 base_height = -8.5
 ramp_slope = 0.0
 wave_a_amplitude = 2.1
-wave_a_frequency = 0.200
+wave_a_frequency = 0.180
 wave_b_amplitude = 0.9
-wave_b_frequency = 0.620
+wave_b_frequency = 0.558
+
+[scoring]
+points_per_meter = 1.0
+airtime_points_per_second = 14.0
+wheelie_points_per_second = 18.0
+flip_points = 120
+no_damage_bonus = 600

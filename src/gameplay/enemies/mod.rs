@@ -1,9 +1,11 @@
 use crate::config::{EnemyTypeConfig, GameConfig, WeaponConfig};
 use crate::debug::{DebugGameplayGuards, EnemyDebugMarker};
+use crate::gameplay::combat::EnemyKilledEvent;
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
+use std::collections::HashSet;
 use std::f32::consts::TAU;
 
 const ENEMY_SPAWN_START_AHEAD_M: f32 = 32.0;
@@ -33,6 +35,9 @@ const ENEMY_BOMB_THICKNESS_M: f32 = 0.62;
 const ENEMY_PROJECTILE_ARC_GRAVITY_SCALE: f32 = 0.6;
 const PLAYER_CONTACT_HIT_RADIUS_M: f32 = 1.45;
 const PLAYER_PROJECTILE_HIT_RADIUS_M: f32 = 1.25;
+const PLAYER_CRASH_MIN_SPEED_MPS: f32 = 2.0;
+const PLAYER_CRASH_DAMAGE_TO_ENEMY_BASE_PER_SECOND: f32 = 30.0;
+const PLAYER_CRASH_DAMAGE_TO_ENEMY_PER_MPS_PER_SECOND: f32 = 4.0;
 const MIN_ENEMY_FIRE_RATE_HZ: f32 = 0.05;
 const MIN_ENEMY_FIRE_COOLDOWN_S: f32 = 0.12;
 const ENEMY_MASS_PER_RADIUS_SQUARED: f32 = 18.0;
@@ -43,7 +48,13 @@ pub struct EnemyGameplayPlugin;
 impl Plugin for EnemyGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EnemyBootstrapState>()
-            .add_systems(OnEnter(GameState::InRun), reset_enemy_bootstrap)
+            .init_resource::<EnemyContactTracker>()
+            .add_message::<PlayerDamageEvent>()
+            .add_message::<PlayerEnemyCrashEvent>()
+            .add_systems(
+                OnEnter(GameState::InRun),
+                (reset_enemy_bootstrap, reset_enemy_contact_tracker),
+            )
             .add_systems(OnExit(GameState::InRun), cleanup_enemy_run_entities)
             .add_systems(
                 Update,
@@ -157,8 +168,37 @@ struct EnemyBootstrapState {
     wave_counter: u32,
 }
 
+#[derive(Resource, Debug, Default)]
+struct EnemyContactTracker {
+    currently_colliding: HashSet<Entity>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerDamageSource {
+    ProjectileBullet,
+    ProjectileMissile,
+    ProjectileBomb,
+    Contact,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PlayerDamageEvent {
+    pub amount: f32,
+    pub source: PlayerDamageSource,
+}
+
+#[derive(Message, Debug, Clone)]
+pub struct PlayerEnemyCrashEvent {
+    pub player_speed_mps: f32,
+    pub enemy_type_id: String,
+}
+
 fn reset_enemy_bootstrap(mut bootstrap: ResMut<EnemyBootstrapState>) {
     bootstrap.seeded = false;
+}
+
+fn reset_enemy_contact_tracker(mut tracker: ResMut<EnemyContactTracker>) {
+    tracker.currently_colliding.clear();
 }
 
 #[allow(clippy::type_complexity)]
@@ -569,6 +609,7 @@ fn simulate_enemy_projectiles(
 fn resolve_enemy_projectile_hits_player(
     mut commands: Commands,
     debug_guards: Option<Res<DebugGameplayGuards>>,
+    mut player_damage_writer: MessageWriter<PlayerDamageEvent>,
     projectile_query: Query<(Entity, &Transform, &EnemyProjectile)>,
     mut player_query: Query<(&Transform, &mut PlayerHealth), With<PlayerVehicle>>,
 ) {
@@ -578,6 +619,9 @@ fn resolve_enemy_projectile_hits_player(
     let player_position = player_transform.translation.truncate();
 
     let mut total_damage = 0.0;
+    let mut bullet_damage = 0.0;
+    let mut missile_damage = 0.0;
+    let mut bomb_damage = 0.0;
     let mut consumed_projectiles = Vec::new();
     for (projectile_entity, transform, projectile) in &projectile_query {
         let projectile_position = transform.translation.truncate();
@@ -585,7 +629,13 @@ fn resolve_enemy_projectile_hits_player(
         if projectile_position.distance_squared(player_position)
             <= (combined_hit_radius * combined_hit_radius)
         {
-            total_damage += projectile.damage.max(0.0);
+            let hit_damage = projectile.damage.max(0.0);
+            total_damage += hit_damage;
+            match projectile.kind {
+                EnemyProjectileKind::Bullet => bullet_damage += hit_damage,
+                EnemyProjectileKind::Missile => missile_damage += hit_damage,
+                EnemyProjectileKind::Bomb => bomb_damage += hit_damage,
+            }
             consumed_projectiles.push(projectile_entity);
         }
     }
@@ -595,6 +645,24 @@ fn resolve_enemy_projectile_hits_player(
         .is_some_and(|guards| guards.player_invulnerable);
     if total_damage > 0.0 && !player_invulnerable {
         player_health.current = (player_health.current - total_damage).max(0.0);
+        if bullet_damage > 0.0 {
+            player_damage_writer.write(PlayerDamageEvent {
+                amount: bullet_damage,
+                source: PlayerDamageSource::ProjectileBullet,
+            });
+        }
+        if missile_damage > 0.0 {
+            player_damage_writer.write(PlayerDamageEvent {
+                amount: missile_damage,
+                source: PlayerDamageSource::ProjectileMissile,
+            });
+        }
+        if bomb_damage > 0.0 {
+            player_damage_writer.write(PlayerDamageEvent {
+                amount: bomb_damage,
+                source: PlayerDamageSource::ProjectileBomb,
+            });
+        }
     }
 
     for projectile_entity in consumed_projectiles {
@@ -602,21 +670,47 @@ fn resolve_enemy_projectile_hits_player(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_enemy_contact_damage_to_player(
+    mut commands: Commands,
     time: Res<Time>,
     config: Res<GameConfig>,
     debug_guards: Option<Res<DebugGameplayGuards>>,
-    mut player_query: Query<(&Transform, &mut PlayerHealth), With<PlayerVehicle>>,
-    enemy_query: Query<(&Transform, &EnemyHitbox, &EnemyTypeId), With<Enemy>>,
+    mut contact_tracker: ResMut<EnemyContactTracker>,
+    mut killed_message_writer: MessageWriter<EnemyKilledEvent>,
+    mut player_damage_writer: MessageWriter<PlayerDamageEvent>,
+    mut crash_event_writer: MessageWriter<PlayerEnemyCrashEvent>,
+    mut player_query: Query<(&Transform, &Velocity, &mut PlayerHealth), With<PlayerVehicle>>,
+    mut enemy_query: Query<
+        (
+            Entity,
+            &Transform,
+            &EnemyHitbox,
+            &EnemyTypeId,
+            &mut EnemyHealth,
+        ),
+        With<Enemy>,
+    >,
 ) {
-    let Ok((player_transform, mut player_health)) = player_query.single_mut() else {
+    let Ok((player_transform, player_velocity, mut player_health)) = player_query.single_mut()
+    else {
         return;
     };
     let player_position = player_transform.translation.truncate();
+    let player_speed_mps = player_velocity.linvel.length();
     let dt = time.delta_secs();
 
     let mut total_contact_damage = 0.0;
-    for (enemy_transform, enemy_hitbox, enemy_type_id) in &enemy_query {
+    let mut dead_enemies: Vec<(Entity, String)> = Vec::new();
+    let mut current_colliding_enemies = HashSet::new();
+    for (enemy_entity, enemy_transform, enemy_hitbox, enemy_type_id, mut enemy_health) in
+        &mut enemy_query
+    {
+        if enemy_health.current <= 0.0 {
+            dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
+            continue;
+        }
+
         let Some(enemy_type) = config.enemy_types_by_id.get(&enemy_type_id.0) else {
             continue;
         };
@@ -627,7 +721,24 @@ fn apply_enemy_contact_damage_to_player(
             .truncate()
             .distance_squared(player_position);
         if distance_sq <= combined_radius * combined_radius {
+            current_colliding_enemies.insert(enemy_entity);
             total_contact_damage += enemy_type.contact_damage.max(0.0) * dt;
+
+            if player_speed_mps >= PLAYER_CRASH_MIN_SPEED_MPS {
+                if !contact_tracker.currently_colliding.contains(&enemy_entity) {
+                    crash_event_writer.write(PlayerEnemyCrashEvent {
+                        player_speed_mps,
+                        enemy_type_id: enemy_type_id.0.clone(),
+                    });
+                }
+                let crash_damage = (PLAYER_CRASH_DAMAGE_TO_ENEMY_BASE_PER_SECOND
+                    + (player_speed_mps * PLAYER_CRASH_DAMAGE_TO_ENEMY_PER_MPS_PER_SECOND))
+                    * dt;
+                enemy_health.current = (enemy_health.current - crash_damage.max(0.0)).max(0.0);
+                if enemy_health.current <= 0.0 {
+                    dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
+                }
+            }
         }
     }
 
@@ -636,6 +747,16 @@ fn apply_enemy_contact_damage_to_player(
         .is_some_and(|guards| guards.player_invulnerable);
     if total_contact_damage > 0.0 && !player_invulnerable {
         player_health.current = (player_health.current - total_contact_damage).max(0.0);
+        player_damage_writer.write(PlayerDamageEvent {
+            amount: total_contact_damage,
+            source: PlayerDamageSource::Contact,
+        });
+    }
+    contact_tracker.currently_colliding = current_colliding_enemies;
+
+    for (enemy_entity, enemy_type_id) in dead_enemies {
+        killed_message_writer.write(EnemyKilledEvent { enemy_type_id });
+        commands.entity(enemy_entity).try_despawn();
     }
 }
 

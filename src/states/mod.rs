@@ -1,6 +1,8 @@
 use crate::config::GameConfig;
 use crate::gameplay::combat::EnemyKilledEvent;
-use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle, VehicleTelemetry};
+use crate::gameplay::vehicle::{
+    PlayerHealth, PlayerVehicle, VehicleStuntMetrics, VehicleTelemetry,
+};
 use bevy::app::AppExit;
 use bevy::asset::LoadState;
 use bevy::prelude::*;
@@ -36,8 +38,10 @@ impl Plugin for GameStatePlugin {
             .add_systems(
                 Update,
                 (
-                    update_run_summary_score,
+                    update_run_summary_progress,
                     apply_kill_score_events,
+                    apply_stunt_score_sources,
+                    finalize_run_summary_score,
                     trigger_results_on_player_death,
                     in_run_controls,
                 )
@@ -71,8 +75,21 @@ struct LoadingScreenState {
 struct RunSummary {
     score: u32,
     distance_m: f32,
+    distance_score: u32,
     kill_score: u32,
+    stunt_score: u32,
+    airtime_score: u32,
+    wheelie_score: u32,
+    flip_score: u32,
+    no_damage_bonus_score: u32,
     kill_count: u32,
+    total_airtime_s: f32,
+    total_wheelie_s: f32,
+    flip_count: u32,
+    big_jump_count: u32,
+    huge_jump_count: u32,
+    long_wheelie_count: u32,
+    took_damage: bool,
     was_game_over: bool,
 }
 
@@ -150,14 +167,28 @@ fn loading_to_in_run(
 fn enter_in_run(mut run_summary: ResMut<RunSummary>) {
     run_summary.score = 0;
     run_summary.distance_m = 0.0;
+    run_summary.distance_score = 0;
     run_summary.kill_score = 0;
+    run_summary.stunt_score = 0;
+    run_summary.airtime_score = 0;
+    run_summary.wheelie_score = 0;
+    run_summary.flip_score = 0;
+    run_summary.no_damage_bonus_score = 0;
     run_summary.kill_count = 0;
+    run_summary.total_airtime_s = 0.0;
+    run_summary.total_wheelie_s = 0.0;
+    run_summary.flip_count = 0;
+    run_summary.big_jump_count = 0;
+    run_summary.huge_jump_count = 0;
+    run_summary.long_wheelie_count = 0;
+    run_summary.took_damage = false;
     run_summary.was_game_over = false;
     info!("Entered state: InRun");
 }
 
-fn update_run_summary_score(
+fn update_run_summary_progress(
     telemetry: Option<Res<VehicleTelemetry>>,
+    player_query: Query<&PlayerHealth, With<PlayerVehicle>>,
     mut run_summary: ResMut<RunSummary>,
 ) {
     let Some(telemetry) = telemetry else {
@@ -165,7 +196,77 @@ fn update_run_summary_score(
     };
 
     run_summary.distance_m = telemetry.distance_m.max(0.0);
-    run_summary.score = run_summary.distance_m.round() as u32 + run_summary.kill_score;
+    let Ok(player_health) = player_query.single() else {
+        return;
+    };
+    if player_health.current < player_health.max {
+        run_summary.took_damage = true;
+    }
+}
+
+fn apply_stunt_score_sources(
+    metrics: Option<Res<VehicleStuntMetrics>>,
+    config: Option<Res<GameConfig>>,
+    mut run_summary: ResMut<RunSummary>,
+) {
+    let Some(metrics) = metrics else {
+        return;
+    };
+    let Some(config) = config else {
+        return;
+    };
+
+    run_summary.total_airtime_s = metrics.airtime_total_s.max(0.0);
+    run_summary.total_wheelie_s = metrics.wheelie_total_s.max(0.0);
+    run_summary.flip_count = metrics.flip_count;
+    run_summary.big_jump_count = metrics.big_jump_count;
+    run_summary.huge_jump_count = metrics.huge_jump_count;
+    run_summary.long_wheelie_count = metrics.long_wheelie_count;
+
+    run_summary.airtime_score = score_points_from_duration(
+        run_summary.total_airtime_s,
+        config.game.scoring.airtime_points_per_second,
+    );
+    run_summary.wheelie_score = score_points_from_duration(
+        run_summary.total_wheelie_s,
+        config.game.scoring.wheelie_points_per_second,
+    );
+    run_summary.flip_score = run_summary
+        .flip_count
+        .saturating_mul(config.game.scoring.flip_points);
+    run_summary.stunt_score = run_summary
+        .airtime_score
+        .saturating_add(run_summary.wheelie_score)
+        .saturating_add(run_summary.flip_score);
+}
+
+fn finalize_run_summary_score(
+    config: Option<Res<GameConfig>>,
+    mut run_summary: ResMut<RunSummary>,
+) {
+    let Some(config) = config else {
+        return;
+    };
+
+    run_summary.distance_score =
+        score_points_from_duration(run_summary.distance_m, config.game.scoring.points_per_meter);
+    run_summary.no_damage_bonus_score = if run_summary.took_damage {
+        0
+    } else {
+        config.game.scoring.no_damage_bonus
+    };
+    run_summary.score = run_summary
+        .distance_score
+        .saturating_add(run_summary.kill_score)
+        .saturating_add(run_summary.stunt_score)
+        .saturating_add(run_summary.no_damage_bonus_score);
+}
+
+fn score_points_from_duration(duration: f32, points_per_unit: f32) -> u32 {
+    if !duration.is_finite() || !points_per_unit.is_finite() {
+        return 0;
+    }
+    (duration.max(0.0) * points_per_unit.max(0.0)).floor() as u32
 }
 
 fn apply_kill_score_events(
@@ -191,7 +292,6 @@ fn apply_kill_score_events(
 
     if total_added > 0 {
         run_summary.kill_score = run_summary.kill_score.saturating_add(total_added);
-        run_summary.score = run_summary.distance_m.round() as u32 + run_summary.kill_score;
     }
 }
 
@@ -211,6 +311,7 @@ fn trigger_results_on_player_death(
                 run_summary.score
             );
         }
+        run_summary.took_damage = true;
         run_summary.was_game_over = true;
         next_state.set(GameState::Results);
     }
@@ -254,9 +355,37 @@ fn enter_results(mut commands: Commands, run_summary: Res<RunSummary>) {
     } else {
         "RESULTS"
     };
+    let no_damage_line = if run_summary.no_damage_bonus_score > 0 {
+        format!("No Damage Bonus: +{}", run_summary.no_damage_bonus_score)
+    } else {
+        "No Damage Bonus: +0".to_string()
+    };
     let summary_text = format!(
-        "{title}\nScore: {}\nDistance: {:.1} m\nKills: {} (+{})\n\nSpace - New Run\nQ - Quit",
-        run_summary.score, run_summary.distance_m, run_summary.kill_count, run_summary.kill_score
+        "Score: {score}\n\
+Distance: {distance:.1} m (+{distance_score})\n\
+Kills: {kill_count} (+{kill_score})\n\
+Stunts: +{stunt_score} (airtime +{airtime_score}, wheelie +{wheelie_score}, flips +{flip_score})\n\
+Airtime Total: {airtime_total:.2}s | Wheelie Total: {wheelie_total:.2}s | Flips: {flip_count}\n\
+Big/Huge Jumps: {big_jumps}/{huge_jumps} | Long Wheelies: {long_wheelies}\n\
+{no_damage_line}\n\n\
+Space - New Run\n\
+Q - Quit",
+        score = run_summary.score,
+        distance = run_summary.distance_m,
+        distance_score = run_summary.distance_score,
+        kill_count = run_summary.kill_count,
+        kill_score = run_summary.kill_score,
+        stunt_score = run_summary.stunt_score,
+        airtime_score = run_summary.airtime_score,
+        wheelie_score = run_summary.wheelie_score,
+        flip_score = run_summary.flip_score,
+        airtime_total = run_summary.total_airtime_s,
+        wheelie_total = run_summary.total_wheelie_s,
+        flip_count = run_summary.flip_count,
+        big_jumps = run_summary.big_jump_count,
+        huge_jumps = run_summary.huge_jump_count,
+        long_wheelies = run_summary.long_wheelie_count,
+        no_damage_line = no_damage_line,
     );
 
     commands
@@ -270,22 +399,43 @@ fn enter_results(mut commands: Commands, run_summary: Res<RunSummary>) {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.02, 0.03, 0.05, 0.82)),
+            BackgroundColor(Color::srgba(0.01, 0.02, 0.03, 0.94)),
             ZIndex(300),
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Text::new(summary_text),
-                TextFont {
-                    font_size: 46.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.93, 0.96, 0.99)),
-                Node {
-                    padding: UiRect::all(Val::Px(16.0)),
-                    ..default()
-                },
-            ));
+            parent
+                .spawn((
+                    Node {
+                        width: Val::Percent(74.0),
+                        max_width: Val::Px(980.0),
+                        min_width: Val::Px(520.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(10.0),
+                        padding: UiRect::all(Val::Px(16.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.08, 0.10, 0.13, 0.96)),
+                    BorderColor::all(Color::srgba(0.56, 0.62, 0.68, 0.92)),
+                ))
+                .with_children(|panel| {
+                    panel.spawn((
+                        Text::new(title),
+                        TextFont {
+                            font_size: 52.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.94, 0.97, 1.00)),
+                    ));
+                    panel.spawn((
+                        Text::new(summary_text),
+                        TextFont {
+                            font_size: 22.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(0.90, 0.94, 0.98)),
+                    ));
+                });
         });
 
     info!("Entered state: Results");

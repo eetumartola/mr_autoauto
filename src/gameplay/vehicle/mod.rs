@@ -35,6 +35,8 @@ const WHEEL_FRICTION_MIN_FACTOR: f32 = 0.30;
 const START_HEIGHT_OFFSET: f32 = 4.0;
 const CAMERA_Y: f32 = -2.0;
 const CAMERA_Z: f32 = 999.9;
+const CAMERA_LOOKAHEAD_MAX_STEP_MPS: f32 = 24.0;
+const CAMERA_FOLLOW_SMOOTH_RATE_HZ: f32 = 10.0;
 const GROUND_MAX_ANGULAR_SPEED: f32 = 5.5;
 const REAR_TRACTION_ASSIST_FALLBACK_DISTANCE_M: f32 = 0.28;
 const AIR_ANGULAR_DAMPING: f32 = 0.96;
@@ -71,14 +73,17 @@ impl Plugin for VehicleGameplayPlugin {
         app.init_resource::<VehicleInputState>()
             .init_resource::<VehicleInputBindings>()
             .init_resource::<VehicleTelemetry>()
+            .init_resource::<CameraFollowState>()
             .init_resource::<VehicleStuntMetrics>()
             .init_resource::<StuntTrackingState>()
+            .add_message::<VehicleStuntEvent>()
             .add_systems(
                 OnEnter(GameState::InRun),
                 (
                     configure_camera_units,
                     spawn_vehicle_scene,
                     reset_stunt_metrics,
+                    reset_camera_follow_state,
                 ),
             )
             .add_systems(OnExit(GameState::InRun), cleanup_vehicle_scene)
@@ -226,13 +231,24 @@ pub struct VehicleTelemetry {
     pub grounded: bool,
 }
 
+#[derive(Resource, Debug, Clone, Default)]
+struct CameraFollowState {
+    initialized: bool,
+    look_ahead_m: f32,
+}
+
 #[derive(Resource, Debug, Clone)]
 pub struct VehicleStuntMetrics {
     pub airtime_current_s: f32,
+    pub airtime_total_s: f32,
     pub airtime_best_s: f32,
     pub wheelie_current_s: f32,
+    pub wheelie_total_s: f32,
     pub wheelie_best_s: f32,
     pub flip_count: u32,
+    pub big_jump_count: u32,
+    pub huge_jump_count: u32,
+    pub long_wheelie_count: u32,
     pub crash_count: u32,
     pub max_speed_mps: f32,
     pub last_landing_impact_speed_mps: f32,
@@ -242,10 +258,15 @@ impl Default for VehicleStuntMetrics {
     fn default() -> Self {
         Self {
             airtime_current_s: 0.0,
+            airtime_total_s: 0.0,
             airtime_best_s: 0.0,
             wheelie_current_s: 0.0,
+            wheelie_total_s: 0.0,
             wheelie_best_s: 0.0,
             flip_count: 0,
+            big_jump_count: 0,
+            huge_jump_count: 0,
+            long_wheelie_count: 0,
             crash_count: 0,
             max_speed_mps: 0.0,
             last_landing_impact_speed_mps: 0.0,
@@ -259,6 +280,15 @@ struct StuntTrackingState {
     was_grounded: bool,
     previous_angle_rad: f32,
     airborne_rotation_accum_rad: f32,
+    wheelie_long_awarded_this_streak: bool,
+}
+
+#[derive(Message, Debug, Clone, Copy, PartialEq)]
+pub enum VehicleStuntEvent {
+    AirtimeBig { duration_s: f32 },
+    AirtimeHuge { duration_s: f32 },
+    WheelieLong { duration_s: f32 },
+    Flip { total_flips: u32 },
 }
 
 impl Default for VehicleTelemetry {
@@ -698,8 +728,10 @@ fn reset_stunt_metrics(
 
 fn update_stunt_metrics(
     time: Res<Time>,
+    config: Res<GameConfig>,
     mut metrics: ResMut<VehicleStuntMetrics>,
     mut tracking: ResMut<StuntTrackingState>,
+    mut stunt_events: MessageWriter<VehicleStuntEvent>,
     player_query: Query<(&Transform, &VehicleKinematics, &GroundContact), With<PlayerVehicle>>,
 ) {
     let Ok((transform, kinematics, contact)) = player_query.single() else {
@@ -717,11 +749,28 @@ fn update_stunt_metrics(
 
     metrics.max_speed_mps = metrics.max_speed_mps.max(kinematics.velocity.length());
 
+    let commentator_thresholds = &config.commentator.thresholds;
     if contact.grounded {
+        if !tracking.was_grounded {
+            let landed_airtime_s = metrics.airtime_current_s;
+            if landed_airtime_s >= commentator_thresholds.airtime_huge_jump.max(0.01) {
+                metrics.huge_jump_count = metrics.huge_jump_count.saturating_add(1);
+                metrics.big_jump_count = metrics.big_jump_count.saturating_add(1);
+                stunt_events.write(VehicleStuntEvent::AirtimeHuge {
+                    duration_s: landed_airtime_s,
+                });
+            } else if landed_airtime_s >= commentator_thresholds.airtime_big_jump.max(0.01) {
+                metrics.big_jump_count = metrics.big_jump_count.saturating_add(1);
+                stunt_events.write(VehicleStuntEvent::AirtimeBig {
+                    duration_s: landed_airtime_s,
+                });
+            }
+        }
         metrics.airtime_current_s = 0.0;
         tracking.airborne_rotation_accum_rad = 0.0;
     } else {
         metrics.airtime_current_s += dt;
+        metrics.airtime_total_s += dt;
         metrics.airtime_best_s = metrics.airtime_best_s.max(metrics.airtime_current_s);
 
         if !tracking.was_grounded {
@@ -729,6 +778,9 @@ fn update_stunt_metrics(
                 shortest_angle_delta_rad(angle_rad, tracking.previous_angle_rad).abs();
             while tracking.airborne_rotation_accum_rad >= TAU {
                 metrics.flip_count = metrics.flip_count.saturating_add(1);
+                stunt_events.write(VehicleStuntEvent::Flip {
+                    total_flips: metrics.flip_count,
+                });
                 tracking.airborne_rotation_accum_rad -= TAU;
             }
         }
@@ -740,9 +792,20 @@ fn update_stunt_metrics(
         && kinematics.velocity.x.abs() >= WHEELIE_MIN_SPEED_MPS
     {
         metrics.wheelie_current_s += dt;
+        metrics.wheelie_total_s += dt;
         metrics.wheelie_best_s = metrics.wheelie_best_s.max(metrics.wheelie_current_s);
+        if !tracking.wheelie_long_awarded_this_streak
+            && metrics.wheelie_current_s >= commentator_thresholds.wheelie_long.max(0.01)
+        {
+            metrics.long_wheelie_count = metrics.long_wheelie_count.saturating_add(1);
+            tracking.wheelie_long_awarded_this_streak = true;
+            stunt_events.write(VehicleStuntEvent::WheelieLong {
+                duration_s: metrics.wheelie_current_s,
+            });
+        }
     } else {
         metrics.wheelie_current_s = 0.0;
+        tracking.wheelie_long_awarded_this_streak = false;
     }
 
     if contact.just_landed {
@@ -1108,9 +1171,15 @@ fn update_vehicle_telemetry(
     telemetry.grounded = contact.grounded;
 }
 
+fn reset_camera_follow_state(mut state: ResMut<CameraFollowState>) {
+    *state = CameraFollowState::default();
+}
+
 fn camera_follow_vehicle(
+    time: Res<Time>,
     telemetry: Res<VehicleTelemetry>,
     config: Res<GameConfig>,
+    mut follow_state: ResMut<CameraFollowState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
     mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<PlayerVehicle>)>,
 ) {
@@ -1124,10 +1193,27 @@ fn camera_follow_vehicle(
     let Ok(mut camera_transform) = camera_query.single_mut() else {
         return;
     };
-
-    camera_transform.translation.x = player_transform.translation.x
-        + (telemetry.speed_mps * vehicle.camera_look_ahead_factor)
-            .clamp(vehicle.camera_look_ahead_min, vehicle.camera_look_ahead_max);
+    let target_look_ahead_m = (telemetry.speed_mps * vehicle.camera_look_ahead_factor)
+        .clamp(vehicle.camera_look_ahead_min, vehicle.camera_look_ahead_max);
+    let dt = time.delta_secs().max(0.000_1);
+    let max_look_ahead_step = CAMERA_LOOKAHEAD_MAX_STEP_MPS * dt;
+    if !follow_state.initialized {
+        follow_state.initialized = true;
+        follow_state.look_ahead_m = target_look_ahead_m;
+        camera_transform.translation.x = player_transform.translation.x + target_look_ahead_m;
+    } else {
+        follow_state.look_ahead_m = move_towards(
+            follow_state.look_ahead_m,
+            target_look_ahead_m,
+            max_look_ahead_step,
+        );
+        let target_camera_x = player_transform.translation.x + follow_state.look_ahead_m;
+        let camera_blend = (CAMERA_FOLLOW_SMOOTH_RATE_HZ * dt).clamp(0.0, 1.0);
+        camera_transform.translation.x = camera_transform
+            .translation
+            .x
+            .lerp(target_camera_x, camera_blend);
+    }
     camera_transform.translation.y = CAMERA_Y;
     camera_transform.translation.z = CAMERA_Z;
 }

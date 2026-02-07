@@ -233,7 +233,7 @@ environment = "ice"
   - add spring-damper behavior per tire with configurable rest length, stiffness, damping, and travel limits.
 - [done] BR4. Tire-ground contact and push response:
   - integrate tire contact, traction/slip tuning, and stable collision response between chassis/enemies/terrain.
-- [in progress] BR4a. Rapier migration pass for current driving dynamics:
+- [done] BR4a. Rapier migration pass for current driving dynamics:
   - run vehicle body under `bevy_rapier2d` rigidbody/collider simulation.
   - keep box-collider terrain for tuning pass before visual polish.
   - preserve current control semantics (rear-drive traction, spring behavior, stunt telemetry) on top of Rapier.
@@ -329,7 +329,7 @@ environment = "ice"
 **Goal:** simple progression that makes replay meaningful.
 
 **Tasks**
-- [in progress] F1. Score sources:
+- [done] F1. Score sources:
   - distance, kills, stunts (airtime/wheelie/flip), "no damage" bonus.
 - [not started] F2. Currency drops (coins/parts).
 - [not started] F3. Upgrade selection UI:
@@ -349,25 +349,30 @@ environment = "ice"
 **Goal:** narrator is reliable, rate-limited, and clearly reactive to gameplay.
 
 **Tasks**
-- [not started] G1. Event model:
+- [done] G1. Event model:
   - `GameEvent` enum (JumpBig, WheelieLong, Flip, Kill, BossKill, Crash, SpeedTier, NearDeath, Streak).
-- [not started] G2. Event aggregation:
+- [done] G2. Event aggregation:
   - batch events into a compact "what happened" text summary.
   - de-duplicate spammy events; apply cooldowns and priorities.
   - route lines in round-robin order between two commentators.
-- [not started] G3. Prompt builder:
+- [done] G3. Prompt builder:
   - include run context (segment name, score streak, player health).
   - include what the other commentator said last time.
   - style knobs from `commentator.toml` (tone, length, profanity filter if desired).
-- [not started] G4. Neocortex API client:
-  - async request queue; cancellation (don't narrate stale moments); maintain per-commentator context/session.
-  - retries with backoff; strict timeout.
-- [not started] G5. Audio decode & playback:
-  - store response to file/memory; feed to Bevy audio.
-  - duck SFX/music under narration.
-- [not started] G6. Fallback behavior:
-  - if API fails/offline, play local canned VO lines or text captions.
-- [not started] G7. UI subtitles:
+- [done] G4. Neocortex API client:
+  - async request queue is now wired through a non-blocking worker thread; chat -> audio flow is active.
+  - per-commentator `character_id` and per-commentator chat `session_id` context are now used.
+  - strict request timeout is now enforced via curl timeout flags.
+  - stale-request timeout policy now cancels old requests and immediately falls back to dry subtitles.
+  - retry/backoff policy is now active (configurable retry count and backoff delay).
+- [in progress] G5. Audio decode & playback:
+  - response audio is now read from generated files into memory and played through Bevy audio.
+  - narration volume is now configurable in `commentator.toml`.
+  - remaining: duck SFX/music under narration.
+- [in progress] G6. Fallback behavior:
+  - if API key is missing or API call fails, fallback dry text lines are emitted immediately so gameplay never stalls.
+  - remaining: optional canned local VO playback path.
+- [in progress] G7. UI subtitles:
   - draw returned chat message on screen.
   - subtitle color must depend on which commentator spoke.
   - show captions for both commentators in noisy demo spaces and web autoplay restrictions.
@@ -478,6 +483,18 @@ environment = "ice"
 - Drivetrain update: drive split is now configurable via `vehicles.toml::front_drive_ratio`; starter car defaults to 30% front / 70% rear torque distribution.
 - Handling cap update: airborne angular velocity cap is now configurable via `vehicles.toml::air_max_rotation_speed` and is exposed in the `V` tuning panel.
 - Air-control behavior change: airborne A/D input now sets angular velocity directly (using `air_max_rotation_speed`) instead of applying rotational torque.
+- F1 scoring implementation: `game.toml` now has a configurable `[scoring]` section (`points_per_meter`, airtime/wheelie points per second, flip points, no-damage bonus); run score now combines distance + kills + stunt score + no-damage bonus with full breakdown shown on Results.
+- Stunt counting/source update: `VehicleStuntMetrics` now tracks total airtime, total wheelie time, big/huge jump counts, long-wheelie count, and flips; these are now emitted as `VehicleStuntEvent` messages (big/huge airtime landings, long wheelie streak, flip milestones) for upcoming AI commentator integration.
+- Epic G kickoff implementation: commentary stub now uses a typed `GameEvent` model and automatic ingestion from gameplay signals (stunts, kills, speed tiers, near-death, crashes), while keeping manual `J/K/C` trigger hooks for debugging.
+- Epic G aggregation groundwork: queue processing now has per-event-class anti-spam cooldowns + priority ordering and routes emitted lines in round-robin across two commentator IDs, with previous other-speaker line retained as context for the next line builder.
+- G2 batching implementation: commentary queue now emits compact multi-event summaries (up to four events per line) with de-duplication by aggregation (kills/crashes/speed tiers/jumps/wheelies/flips/near-death/streak) before emission.
+- G3 prompt-builder implementation (stub stage): each pending line now has a generated prompt preview containing run context (`segment`, `distance_m`, `speed_mps`, `health_fraction`, `kill_streak`), previous other-commentator line, thresholds, and a dry-output instruction.
+- Debug visibility update: overlay now shows `Commentary Next Summary` and `Commentary Prompt Preview` so current text-to-send can be inspected before cooldown release.
+- G3 style config update: `commentator.toml` now defines two `[[commentators]]` profiles (id/tone/length/profanity/subtitle color) and commentary knobs (`max_events_per_batch`, per-commentator `style_instruction`); prompt previews now include the selected commentator style block.
+- Debug commentary preview update: overlay now includes `Commentary Pending Speaker` in addition to summary/prompt previews, matching round-robin commentator selection from config.
+- Milestone status update: BR4a (Rapier migration/tuning pass) is now considered done for this iteration; further vehicle feel polish continues as follow-up tuning work, not as a blocker for Epic G.
+- Emotion randomization update: each commentator now has a configurable emotion list; per-line emotion is selected randomly from that commentator profile, with `chat_emotion` emitted lowercase and `voice_emotion` emitted uppercase in the prompt payload.
+- Camera stability fix: camera follow now smooths look-ahead offsets and limits per-frame look-ahead change, preventing visible x-axis jerks when collision impulses spike instantaneous vehicle velocity.
 - Vehicle placeholder tuning detail: wheel hexagons were scaled +20% and moved downward by half a wheel radius for stronger tire readability and stance.
 - BR3 implementation detail: added per-wheel spring-damper suspension state (front/rear) with config-driven rest length, stiffness, damping, and compression/extension travel limits.
 - BR4 implementation detail: tire-ground contact now drives traction/slip scaling from wheel compression; terrain penetration is corrected from wheel clearance, and vehicle stability is improved while preserving existing chassis-enemy push response.
@@ -518,6 +535,22 @@ environment = "ice"
 - Initial controls are keyboard A/D and Left/Right.
 - Preferred narrator audio format for easiest playback: wav (fallback mp3 if needed).
 - `reference/voice_api_example.txt` was repaired and can be used as the API integration reference.
+- Neocortex integration update: commentary runtime now dispatches `/api/v2/chat` first and `/api/v2/audio/generate` second in a non-blocking background worker, using each commentator profile's `character_id`.
+- Session context update: per-commentator `session_id` values are now persisted between requests so George and jerry keep independent chat context.
+- Subtitle update: returned chat lines now appear as on-screen subtitles with speaker-specific colors from `commentator.toml`.
+- Fallback resilience update: when `NEOCORTEX_API_KEY` is missing or request fails/timeouts, the system emits dry fallback text immediately and keeps the game loop non-blocking.
+- Debug visibility update: overlay now shows commentary API request status and the last generated audio output file path.
+- Maintenance note: `src/commentary_stub/mod.rs` now exceeds 1000 LOC and should be split into focused modules (event ingestion/aggregation, Neocortex client, subtitle UI) in a follow-up cleanup pass.
+- Prompt format update: Neocortex chat prompts now omit `SPEAKER`/`CONTEXT` blocks; they include only `EMOTION`, `OTHER COMMENTATOR LAST LINE`, and dry `WHAT HAPPENED` facts while instructing the model to answer with colorful banter (no emoji/markdown).
+- Prompt control update: removed the hardcoded `OUTPUT_RULES` block from Neocortex prompts; style behavior is now controlled by per-commentator `style_instruction` entries in `commentator.toml`.
+- Subtitle readability tweak: commentary subtitle font size was reduced slightly for less visual dominance over gameplay.
+- Collision lethality tuning: player-enemy body collisions now apply high crash damage to enemies (speed-scaled) and can destroy enemies directly via contact.
+- Results screen polish: game-over/results view now uses a centered card panel with smaller body text for cleaner readability over gameplay.
+- Terrain tuning: reduced ground sine frequencies by 10% (`wave_a_frequency`, `wave_b_frequency`) to slightly smooth terrain undulation cadence.
+- Commentary event coverage update: gameplay now emits explicit player-damage events (projectile/contact source), bomb-hit events, and player-enemy crash-impact events for the AI commentary pipeline.
+- Commentary API robustness update: Neocortex worker now retries failed requests with configurable backoff and stale in-flight requests are timed out on the gameplay thread with immediate fallback subtitles.
+- Commentary audio update: generated narration files are now decoded into `AudioSource` assets at runtime and played through Bevy audio with configurable narration volume (`commentator.toml::commentary.narration_volume`).
+- Commentary audio compatibility fix: Neocortex WAV responses may contain placeholder RIFF/data sizes (`0xFFFFFFFF`); playback now normalizes these headers before decode and safely skips malformed/unknown payloads to avoid Bevy audio panics.
 
 ---
 ## 7) Recommended build sequence (milestones)

@@ -456,6 +456,126 @@ impl GameConfig {
                 "game.toml::terrain wave frequencies must be >= 0".to_string(),
             ));
         }
+        if !self.game.scoring.points_per_meter.is_finite()
+            || self.game.scoring.points_per_meter < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::scoring.points_per_meter must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.scoring.airtime_points_per_second.is_finite()
+            || self.game.scoring.airtime_points_per_second < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::scoring.airtime_points_per_second must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.scoring.wheelie_points_per_second.is_finite()
+            || self.game.scoring.wheelie_points_per_second < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::scoring.wheelie_points_per_second must be >= 0".to_string(),
+            ));
+        }
+        if self.commentator.commentary.min_seconds_between_lines < 0.0 {
+            return Err(ConfigError::Validation(
+                "commentator.toml::commentary.min_seconds_between_lines must be >= 0".to_string(),
+            ));
+        }
+        if self.commentator.commentary.max_events_per_batch == 0 {
+            return Err(ConfigError::Validation(
+                "commentator.toml::commentary.max_events_per_batch must be >= 1".to_string(),
+            ));
+        }
+        if !self
+            .commentator
+            .commentary
+            .api_retry_backoff_seconds
+            .is_finite()
+            || self.commentator.commentary.api_retry_backoff_seconds < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "commentator.toml::commentary.api_retry_backoff_seconds must be >= 0".to_string(),
+            ));
+        }
+        if !self
+            .commentator
+            .commentary
+            .api_stale_request_timeout_seconds
+            .is_finite()
+            || self
+                .commentator
+                .commentary
+                .api_stale_request_timeout_seconds
+                <= 0.0
+        {
+            return Err(ConfigError::Validation(
+                "commentator.toml::commentary.api_stale_request_timeout_seconds must be > 0"
+                    .to_string(),
+            ));
+        }
+        if !self.commentator.commentary.narration_volume.is_finite()
+            || self.commentator.commentary.narration_volume < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "commentator.toml::commentary.narration_volume must be >= 0".to_string(),
+            ));
+        }
+        if self.commentator.commentators.len() < 2 {
+            return Err(ConfigError::Validation(
+                "commentator.toml must define at least two `[[commentators]]` profiles".to_string(),
+            ));
+        }
+        let mut commentator_ids = std::collections::HashSet::new();
+        for (index, commentator) in self.commentator.commentators.iter().enumerate() {
+            if commentator.id.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "commentator.toml::commentators[{index}].id cannot be empty"
+                )));
+            }
+            if commentator.name.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "commentator.toml::commentators[{index}].name cannot be empty"
+                )));
+            }
+            if commentator.character_id.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "commentator.toml::commentators[{index}].character_id cannot be empty"
+                )));
+            }
+            if !commentator_ids.insert(commentator.id.clone()) {
+                return Err(ConfigError::Validation(format!(
+                    "commentator.toml::commentators contains duplicate id `{}`",
+                    commentator.id
+                )));
+            }
+            if commentator.style_instruction.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "commentator.toml::commentators[{index}].style_instruction cannot be empty"
+                )));
+            }
+            if !matches!(
+                commentator.style_length.as_str(),
+                "short" | "medium" | "long"
+            ) {
+                return Err(ConfigError::Validation(format!(
+                    "commentator.toml::commentators[{index}].style_length `{}` is unsupported (expected short/medium/long)",
+                    commentator.style_length
+                )));
+            }
+            if commentator.emotions.is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "commentator.toml::commentators[{index}].emotions must contain at least one emotion"
+                )));
+            }
+            for (emotion_index, emotion) in commentator.emotions.iter().enumerate() {
+                if emotion.trim().is_empty() {
+                    return Err(ConfigError::Validation(format!(
+                        "commentator.toml::commentators[{index}].emotions[{emotion_index}] cannot be empty"
+                    )));
+                }
+            }
+        }
 
         for (index, sprite) in self.assets.sprites.iter().enumerate() {
             if sprite.path.trim().is_empty() {
@@ -583,6 +703,8 @@ trait HasId {
 pub struct GameFile {
     pub app: AppConfig,
     pub terrain: TerrainConfig,
+    #[serde(default)]
+    pub scoring: ScoringConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -601,6 +723,52 @@ pub struct TerrainConfig {
     pub wave_a_frequency: f32,
     pub wave_b_amplitude: f32,
     pub wave_b_frequency: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ScoringConfig {
+    #[serde(default = "default_points_per_meter")]
+    pub points_per_meter: f32,
+    #[serde(default = "default_airtime_points_per_second")]
+    pub airtime_points_per_second: f32,
+    #[serde(default = "default_wheelie_points_per_second")]
+    pub wheelie_points_per_second: f32,
+    #[serde(default = "default_flip_points")]
+    pub flip_points: u32,
+    #[serde(default = "default_no_damage_bonus")]
+    pub no_damage_bonus: u32,
+}
+
+impl Default for ScoringConfig {
+    fn default() -> Self {
+        Self {
+            points_per_meter: default_points_per_meter(),
+            airtime_points_per_second: default_airtime_points_per_second(),
+            wheelie_points_per_second: default_wheelie_points_per_second(),
+            flip_points: default_flip_points(),
+            no_damage_bonus: default_no_damage_bonus(),
+        }
+    }
+}
+
+fn default_points_per_meter() -> f32 {
+    1.0
+}
+
+fn default_airtime_points_per_second() -> f32 {
+    14.0
+}
+
+fn default_wheelie_points_per_second() -> f32 {
+    18.0
+}
+
+fn default_flip_points() -> u32 {
+    120
+}
+
+fn default_no_damage_bonus() -> u32 {
+    600
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -916,12 +1084,45 @@ impl HasId for UpgradeConfig {
 pub struct CommentatorFile {
     pub commentary: CommentaryConfig,
     pub thresholds: CommentaryThresholds,
+    #[serde(default = "default_commentator_profiles")]
+    pub commentators: Vec<CommentatorProfile>,
     pub fallback: FallbackLines,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CommentaryConfig {
     pub min_seconds_between_lines: f32,
+    #[serde(default = "default_max_events_per_batch")]
+    pub max_events_per_batch: usize,
+    #[serde(default = "default_commentary_api_max_retries")]
+    pub api_max_retries: u32,
+    #[serde(default = "default_commentary_api_retry_backoff_seconds")]
+    pub api_retry_backoff_seconds: f32,
+    #[serde(default = "default_commentary_api_stale_request_timeout_seconds")]
+    pub api_stale_request_timeout_seconds: f32,
+    #[serde(default = "default_commentary_narration_volume")]
+    pub narration_volume: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CommentatorProfile {
+    pub id: String,
+    #[serde(default = "default_commentator_name")]
+    pub name: String,
+    #[serde(default = "default_commentator_character_id")]
+    pub character_id: String,
+    #[serde(default = "default_commentator_style_instruction")]
+    pub style_instruction: String,
+    #[serde(default = "default_commentator_style_tone")]
+    pub style_tone: String,
+    #[serde(default = "default_commentator_style_length")]
+    pub style_length: String,
+    #[serde(default = "default_commentator_emotions")]
+    pub emotions: Vec<String>,
+    #[serde(default = "default_commentator_profanity_filter")]
+    pub profanity_filter: bool,
+    #[serde(default = "default_commentator_subtitle_color")]
+    pub subtitle_color: [f32; 3],
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -941,6 +1142,100 @@ pub struct CommentaryThresholds {
 #[derive(Debug, Clone, Deserialize)]
 pub struct FallbackLines {
     pub lines: Vec<String>,
+}
+
+fn default_max_events_per_batch() -> usize {
+    4
+}
+
+fn default_commentary_api_max_retries() -> u32 {
+    1
+}
+
+fn default_commentary_api_retry_backoff_seconds() -> f32 {
+    0.75
+}
+
+fn default_commentary_api_stale_request_timeout_seconds() -> f32 {
+    18.0
+}
+
+fn default_commentary_narration_volume() -> f32 {
+    1.0
+}
+
+fn default_commentator_style_instruction() -> String {
+    "Return exactly one short colorful commentary line with playful banter grounded in the game events.".to_string()
+}
+
+fn default_commentator_style_tone() -> String {
+    "neutral".to_string()
+}
+
+fn default_commentator_name() -> String {
+    "Commentator".to_string()
+}
+
+fn default_commentator_character_id() -> String {
+    String::new()
+}
+
+fn default_commentator_style_length() -> String {
+    "short".to_string()
+}
+
+fn default_commentator_emotions() -> Vec<String> {
+    vec!["Neutral".to_string()]
+}
+
+fn default_commentator_profanity_filter() -> bool {
+    true
+}
+
+fn default_commentator_subtitle_color() -> [f32; 3] {
+    [0.9, 0.9, 0.9]
+}
+
+fn default_commentator_profiles() -> Vec<CommentatorProfile> {
+    vec![
+        CommentatorProfile {
+            id: "commentator_a".to_string(),
+            name: "George".to_string(),
+            character_id: "cmlarc6fv0003l404isl4cdxl".to_string(),
+            style_instruction:
+                "Return exactly one short colorful commentary line with playful banter grounded in the game events."
+                    .to_string(),
+            style_tone: "analytical".to_string(),
+            style_length: "short".to_string(),
+            emotions: vec![
+                "Neutral".to_string(),
+                "Concerned".to_string(),
+                "Pleased".to_string(),
+                "Confident".to_string(),
+            ],
+            profanity_filter: true,
+            subtitle_color: [0.55, 0.85, 1.00],
+        },
+        CommentatorProfile {
+            id: "commentator_b".to_string(),
+            name: "jerry".to_string(),
+            character_id: "cmlcaw5810001i804mblfloyr".to_string(),
+            style_instruction:
+                "Return exactly one short colorful commentary line with playful banter grounded in the game events."
+                    .to_string(),
+            style_tone: "hyped".to_string(),
+            style_length: "short".to_string(),
+            emotions: vec![
+                "Happy".to_string(),
+                "Amazed".to_string(),
+                "Curious".to_string(),
+                "Impressed".to_string(),
+                "Confident".to_string(),
+            ],
+            profanity_filter: true,
+            subtitle_color: [1.00, 0.78, 0.40],
+        },
+    ]
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -1028,6 +1323,7 @@ mod tests {
                     wave_b_amplitude: 20.0,
                     wave_b_frequency: 0.041,
                 },
+                scoring: ScoringConfig::default(),
             },
             assets: AssetsFile::default(),
             segments: SegmentsFile {
@@ -1170,6 +1466,11 @@ mod tests {
             commentator: CommentatorFile {
                 commentary: CommentaryConfig {
                     min_seconds_between_lines: 4.0,
+                    max_events_per_batch: 4,
+                    api_max_retries: 1,
+                    api_retry_backoff_seconds: 0.75,
+                    api_stale_request_timeout_seconds: 18.0,
+                    narration_volume: 1.0,
                 },
                 thresholds: CommentaryThresholds {
                     airtime_big_jump: 1.0,
@@ -1180,6 +1481,45 @@ mod tests {
                     speed_tier_2: 18.0,
                     near_death_health_fraction: 0.15,
                 },
+                commentators: vec![
+                    CommentatorProfile {
+                        id: "commentator_a".to_string(),
+                        name: "George".to_string(),
+                        character_id: "cmlarc6fv0003l404isl4cdxl".to_string(),
+                        style_instruction:
+                            "Return exactly one short colorful commentary line with playful banter grounded in the game events."
+                                .to_string(),
+                        style_tone: "analytical".to_string(),
+                        style_length: "short".to_string(),
+                        emotions: vec![
+                            "Neutral".to_string(),
+                            "Concerned".to_string(),
+                            "Pleased".to_string(),
+                            "Confident".to_string(),
+                        ],
+                        profanity_filter: true,
+                        subtitle_color: [0.55, 0.85, 1.00],
+                    },
+                    CommentatorProfile {
+                        id: "commentator_b".to_string(),
+                        name: "jerry".to_string(),
+                        character_id: "cmlcaw5810001i804mblfloyr".to_string(),
+                        style_instruction:
+                            "Return exactly one short colorful commentary line with playful banter grounded in the game events."
+                                .to_string(),
+                        style_tone: "hyped".to_string(),
+                        style_length: "short".to_string(),
+                        emotions: vec![
+                            "Happy".to_string(),
+                            "Amazed".to_string(),
+                            "Curious".to_string(),
+                            "Impressed".to_string(),
+                            "Confident".to_string(),
+                        ],
+                        profanity_filter: true,
+                        subtitle_color: [1.00, 0.78, 0.40],
+                    },
+                ],
                 fallback: FallbackLines {
                     lines: vec!["Nice!".to_string()],
                 },
