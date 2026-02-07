@@ -1,7 +1,7 @@
 [[vehicles]]
 id = "starter_car"
 health = 100.0
-acceleration = 4.0
+acceleration = 8.0
 brake_strength = 6.0
 air_pitch_torque = 7.0
 max_forward_speed = 16.5
@@ -12,8 +12,17 @@ ground_coast_damping = 0.18
 air_base_damping = 0.09
 air_env_drag_factor = 0.45
 linear_inertia = 0.8
-rotational_inertia = 1.2
+rotational_inertia = 1.8
 gravity_scale = 0.385
+suspension_rest_length_m = 0.78
+suspension_stiffness = 14.0
+suspension_damping = 2.0
+suspension_max_compression_m = 0.46
+suspension_max_extension_m = 0.46
+tire_longitudinal_grip = 1.0
+tire_slip_grip_floor = 0.45
+rear_drive_traction_assist_distance_m = 0.20
+rear_drive_traction_assist_min_factor = 0.65
 turret_range_m = 28.0
 turret_cone_degrees = 60.0
 turret_target_priority = "nearest"

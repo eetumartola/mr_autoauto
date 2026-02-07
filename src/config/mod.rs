@@ -370,6 +370,51 @@ impl GameConfig {
                     "vehicles.toml::vehicles[{index}].gravity_scale must be > 0"
                 )));
             }
+            if vehicle.suspension_rest_length_m <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].suspension_rest_length_m must be > 0"
+                )));
+            }
+            if vehicle.suspension_stiffness <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].suspension_stiffness must be > 0"
+                )));
+            }
+            if vehicle.suspension_damping < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].suspension_damping must be >= 0"
+                )));
+            }
+            if vehicle.suspension_max_compression_m <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].suspension_max_compression_m must be > 0"
+                )));
+            }
+            if vehicle.suspension_max_extension_m < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].suspension_max_extension_m must be >= 0"
+                )));
+            }
+            if vehicle.tire_longitudinal_grip <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].tire_longitudinal_grip must be > 0"
+                )));
+            }
+            if !(0.0..=1.0).contains(&vehicle.tire_slip_grip_floor) {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].tire_slip_grip_floor must be in [0, 1]"
+                )));
+            }
+            if vehicle.rear_drive_traction_assist_distance_m < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].rear_drive_traction_assist_distance_m must be >= 0"
+                )));
+            }
+            if !(0.0..=1.0).contains(&vehicle.rear_drive_traction_assist_min_factor) {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].rear_drive_traction_assist_min_factor must be in [0, 1]"
+                )));
+            }
             if vehicle.turret_range_m <= 0.0 {
                 return Err(ConfigError::Validation(format!(
                     "vehicles.toml::vehicles[{index}].turret_range_m must be > 0"
@@ -732,6 +777,24 @@ pub struct VehicleConfig {
     pub linear_inertia: f32,
     pub rotational_inertia: f32,
     pub gravity_scale: f32,
+    #[serde(default = "default_suspension_rest_length_m")]
+    pub suspension_rest_length_m: f32,
+    #[serde(default = "default_suspension_stiffness")]
+    pub suspension_stiffness: f32,
+    #[serde(default = "default_suspension_damping")]
+    pub suspension_damping: f32,
+    #[serde(default = "default_suspension_max_compression_m")]
+    pub suspension_max_compression_m: f32,
+    #[serde(default = "default_suspension_max_extension_m")]
+    pub suspension_max_extension_m: f32,
+    #[serde(default = "default_tire_longitudinal_grip")]
+    pub tire_longitudinal_grip: f32,
+    #[serde(default = "default_tire_slip_grip_floor")]
+    pub tire_slip_grip_floor: f32,
+    #[serde(default = "default_rear_drive_traction_assist_distance_m")]
+    pub rear_drive_traction_assist_distance_m: f32,
+    #[serde(default = "default_rear_drive_traction_assist_min_factor")]
+    pub rear_drive_traction_assist_min_factor: f32,
     #[serde(default = "default_turret_range_m")]
     pub turret_range_m: f32,
     #[serde(default = "default_turret_cone_degrees")]
@@ -750,6 +813,42 @@ pub struct VehicleConfig {
 
 fn default_turret_range_m() -> f32 {
     28.0
+}
+
+fn default_suspension_rest_length_m() -> f32 {
+    0.78
+}
+
+fn default_suspension_stiffness() -> f32 {
+    38.0
+}
+
+fn default_suspension_damping() -> f32 {
+    8.0
+}
+
+fn default_suspension_max_compression_m() -> f32 {
+    0.34
+}
+
+fn default_suspension_max_extension_m() -> f32 {
+    0.28
+}
+
+fn default_tire_longitudinal_grip() -> f32 {
+    1.0
+}
+
+fn default_tire_slip_grip_floor() -> f32 {
+    0.45
+}
+
+fn default_rear_drive_traction_assist_distance_m() -> f32 {
+    0.20
+}
+
+fn default_rear_drive_traction_assist_min_factor() -> f32 {
+    0.55
 }
 
 fn default_turret_cone_degrees() -> f32 {
@@ -1014,6 +1113,15 @@ mod tests {
                     linear_inertia: 1.0,
                     rotational_inertia: 1.0,
                     gravity_scale: 1.0,
+                    suspension_rest_length_m: 0.78,
+                    suspension_stiffness: 38.0,
+                    suspension_damping: 8.0,
+                    suspension_max_compression_m: 0.34,
+                    suspension_max_extension_m: 0.28,
+                    tire_longitudinal_grip: 1.0,
+                    tire_slip_grip_floor: 0.45,
+                    rear_drive_traction_assist_distance_m: 0.20,
+                    rear_drive_traction_assist_min_factor: 0.55,
                     turret_range_m: 28.0,
                     turret_cone_degrees: 60.0,
                     turret_target_priority: "nearest".to_string(),
@@ -1158,6 +1266,15 @@ mod tests {
                     linear_inertia: 1.0,
                     rotational_inertia: 1.0,
                     gravity_scale: 1.0,
+                    suspension_rest_length_m: 0.78,
+                    suspension_stiffness: 38.0,
+                    suspension_damping: 8.0,
+                    suspension_max_compression_m: 0.34,
+                    suspension_max_extension_m: 0.28,
+                    tire_longitudinal_grip: 1.0,
+                    tire_slip_grip_floor: 0.45,
+                    rear_drive_traction_assist_distance_m: 0.20,
+                    rear_drive_traction_assist_min_factor: 0.55,
                     turret_range_m: 28.0,
                     turret_cone_degrees: 60.0,
                     turret_target_priority: "nearest".to_string(),

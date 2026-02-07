@@ -217,6 +217,31 @@ environment = "ice"
 
 ---
 
+### Epic B+ - Player vehicle refinement (chassis/turret/tires + suspension + 3D parts)
+**Goal:** move from placeholder single-body car to a modular physical vehicle that supports final art and better feel.
+
+**Tasks**
+- [done] BR1. Split vehicle into modular entities:
+  - chassis root, turret mount, front tire(s), rear tire(s) as explicit child entities/components.
+- [done] BR2. Rear-wheel drive implementation:
+  - apply drive force/torque only through rear tire contact; front tires are non-driven by default.
+- [done] BR3. Tire suspension model:
+  - add spring-damper behavior per tire with configurable rest length, stiffness, damping, and travel limits.
+- [done] BR4. Tire-ground contact and push response:
+  - integrate tire contact, traction/slip tuning, and stable collision response between chassis/enemies/terrain.
+- [not started] BR5. 3D part asset schema and import pipeline:
+  - define separate model refs for chassis/turret/tire parts and/or node-segment extraction from source model.
+  - add config for attachment points/local offsets so parts mount at correct locations.
+- [not started] BR6. Runtime assembly + validation:
+  - assemble parts into correct hierarchy at spawn, keep transforms synchronized, and add debug checks for misalignment/scale.
+- [not started] BR7. Visual migration pass:
+  - replace coder-art placeholders with production part models while preserving physics/tuning behavior.
+
+**DoD**
+- Player vehicle runs as modular chassis/turret/tire parts, rear-wheel drive is active, suspension travel is visible/stable, and imported 3D parts are correctly aligned at runtime.
+
+---
+
 ### Epic C - Combat: turret, bullets/missiles, hits
 **Goal:** Mr Autofire-style "auto shoots and feels punchy."
 
@@ -428,6 +453,22 @@ environment = "ice"
 - Bomber behavior tuning update: bombers now fly 20% higher than the previous baseline and attack only by dropping free-falling bombs (no aimed pea-shooter fire).
 - Enemy body interaction update: enemies now resolve physical body overlap against player and each other, including size/mass-weighted pushback and impulse carry-over.
 - Scoring update: enemy types now have configurable `kill_score` in `enemy_types.toml`; kills award per-type score and results now show score with kill contribution breakdown.
+- Vehicle refinement scope decision: add Epic B+ for modular vehicle architecture (chassis/turret/tires), rear-wheel drive, suspension, and 3D part import/alignment workflow.
+- BR1 implementation detail: player vehicle is now split into modular child entities (chassis, turret body, front/rear wheel pairs) under a 2D kinematic root transform.
+- BR1 visual debug detail: wheel pairs render as hexagons and rotate from vehicle linear speed so tire rotation is visibly readable.
+- BR2 implementation detail: drive acceleration is now rear-wheel-contact gated (rear-wheel drive); front wheel pair is explicitly non-driven.
+- Vehicle placeholder tuning detail: wheel hexagons were scaled +20% and moved downward by half a wheel radius for stronger tire readability and stance.
+- BR3 implementation detail: added per-wheel spring-damper suspension state (front/rear) with config-driven rest length, stiffness, damping, and compression/extension travel limits.
+- BR4 implementation detail: tire-ground contact now drives traction/slip scaling from wheel compression; terrain penetration is corrected from wheel clearance, and vehicle stability is improved while preserving existing chassis-enemy push response.
+- Traction stability tuning: rear-wheel drive now includes a configurable near-ground traction assist window (default 20 cm) to reduce micro-hop traction loss; reverse torque now uses the same rear-drive contact path so forward/reverse traction is consistent.
+- BR4 regression fix detail: if front wheel is grounded and rear wheel hovers near terrain, rear-drive assist now extends to a fallback assist window (0.30 m) so forward acceleration does not deadlock.
+- BR4 handling tweak: removed vertical wheel/chassis snap-to-ground behavior to preserve throttle/wheelie balance nuance; slope alignment remains in place.
+- Enemy damage tuning: `enemy_bomb_drop` weapon damage was doubled (9.0 -> 18.0).
+- BR4 handling tuning: removed forced terrain-angle alignment entirely and reduced grounded angular damping (`0.80 -> 0.94`); added a stronger rear-drive fallback assist path (support-aware, fallback distance 0.90 m) to avoid deadlock when perched.
+- BR4 suspension readability update: wheel visuals now exaggerate spring travel (render-only) so compression/extension is clearly visible; starter suspension retuned to `stiffness` 14.0, `damping` 2.0, travel `compression/extension` 0.46/0.46 with `rotational_inertia` at 1.8.
+- Run lifecycle reliability fix: all `InRun` gameplay entities are now explicitly cleaned up on `OnExit(GameState::InRun)` (vehicle scene, combat visuals/projectiles/FX, enemies/projectiles), preventing immediate re-death when restarting from Results.
+- Vehicle tuning tweak: starter-car `acceleration` in `vehicles.toml` was doubled (4.0 -> 8.0) to increase forward drive force.
+- Maintenance note: `src/gameplay/vehicle/mod.rs` has grown past 1000 LOC; split into focused submodules (input/physics/visuals/telemetry) during BR5/BR6.
 - Scope decision: keep C6 audio/SFX placeholder wiring deferred for later iteration.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
@@ -446,20 +487,23 @@ This is a suggested order that keeps "always playable":
 ### Milestone 1 - Playable driving slice
 - Epic A (minimum) + Epic B (v0) + straight ground + placeholder background.
 
-### Milestone 2 - Combat and one enemy
+### Milestone 2 - Vehicle refinement pass
+- Epic B+ (modular vehicle parts + rear-wheel drive + suspension + 3D part assembly).
+
+### Milestone 3 - Combat and one enemy
 - Epic C (v0) + Epic D (one enemy type, simple spawner).
 
-### Milestone 3 - Segments and progression
+### Milestone 4 - Segments and progression
 - Epic E (segment concatenation + seam masking) + Epic F (score/run flow).
 
-### Milestone 4 - AI commentator is "the feature"
+### Milestone 5 - AI commentator is "the feature"
 - Epic G end-to-end; add subtitles + debug panel to show emitted events.
 
-### Milestone 5 - Content + polish
+### Milestone 6 - Content + polish
 - Expand enemy roster, add boss, add 5-10 segment configs, upgrade variety.
 - UI/audio polish (Epic H).
 
-### Milestone 6 - Web (only if stable)
+### Milestone 7 - Web (only if stable)
 - Epic I as a final pass.
 
 ---

@@ -47,6 +47,7 @@ impl Plugin for CombatGameplayPlugin {
                 OnEnter(GameState::InRun),
                 (reset_turret_targeting_state, reset_turret_fire_state),
             )
+            .add_systems(OnExit(GameState::InRun), cleanup_combat_entities)
             .add_systems(
                 Update,
                 (
@@ -166,6 +167,25 @@ fn reset_turret_targeting_state(mut targeting: ResMut<TurretTargetingState>) {
 
 fn reset_turret_fire_state(mut fire_state: ResMut<TurretFireState>) {
     *fire_state = TurretFireState::default();
+}
+
+#[allow(clippy::type_complexity)]
+fn cleanup_combat_entities(
+    mut commands: Commands,
+    cleanup_query: Query<
+        Entity,
+        Or<(
+            With<TurretVisualAnchor>,
+            With<TurretTargetLaserVisual>,
+            With<TurretConeBoundaryVisual>,
+            With<PlayerProjectile>,
+            With<FadeOutFx>,
+        )>,
+    >,
+) {
+    for entity in &cleanup_query {
+        commands.entity(entity).despawn();
+    }
 }
 
 fn spawn_turret_visuals(

@@ -50,6 +50,7 @@ impl Plugin for EnemyGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EnemyBootstrapState>()
             .add_systems(OnEnter(GameState::InRun), reset_enemy_bootstrap)
+            .add_systems(OnExit(GameState::InRun), cleanup_enemy_run_entities)
             .add_systems(
                 Update,
                 (
@@ -171,6 +172,24 @@ struct EnemyBootstrapState {
 
 fn reset_enemy_bootstrap(mut bootstrap: ResMut<EnemyBootstrapState>) {
     bootstrap.seeded = false;
+}
+
+#[allow(clippy::type_complexity)]
+fn cleanup_enemy_run_entities(
+    mut commands: Commands,
+    cleanup_query: Query<
+        Entity,
+        Or<(
+            With<Enemy>,
+            With<EnemyProjectile>,
+            With<EnemyHpBarBackground>,
+            With<EnemyHpBarFill>,
+        )>,
+    >,
+) {
+    for entity in &cleanup_query {
+        commands.entity(entity).despawn();
+    }
 }
 
 fn spawn_bootstrap_enemies(
