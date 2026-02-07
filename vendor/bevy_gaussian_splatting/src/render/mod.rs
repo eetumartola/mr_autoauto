@@ -301,7 +301,7 @@ pub struct GpuCloudBundle<R: PlanarSync> {
 }
 
 #[cfg(feature = "buffer_storage")]
-type GpuCloudBundleQuery<R: bevy_interleave::prelude::PlanarSync> = (
+type GpuCloudBundleQuery<R> = (
     Entity,
     &'static <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle,
     &'static Aabb,
@@ -312,7 +312,7 @@ type GpuCloudBundleQuery<R: bevy_interleave::prelude::PlanarSync> = (
 );
 
 #[cfg(feature = "buffer_texture")]
-type GpuCloudBundleQuery<R: bevy_interleave::prelude::PlanarSync> = (
+type GpuCloudBundleQuery<R> = (
     Entity,
     &'static <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle,
     &'static Aabb,
@@ -323,7 +323,7 @@ type GpuCloudBundleQuery<R: bevy_interleave::prelude::PlanarSync> = (
 );
 
 #[cfg(feature = "buffer_storage")]
-type GpuCloudBindGroupQuery<R: bevy_interleave::prelude::PlanarSync> = (
+type GpuCloudBindGroupQuery<R> = (
     Entity,
     &'static <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle,
     &'static SortedEntriesHandle,
@@ -331,7 +331,7 @@ type GpuCloudBindGroupQuery<R: bevy_interleave::prelude::PlanarSync> = (
 );
 
 #[cfg(feature = "buffer_texture")]
-type GpuCloudBindGroupQuery<R: bevy_interleave::prelude::PlanarSync> = (
+type GpuCloudBindGroupQuery<R> = (
     Entity,
     &'static <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle,
     &'static SortedEntriesHandle,
@@ -891,7 +891,7 @@ impl<R: PlanarSync> SpecializedRenderPipeline for CloudPipeline<R> {
     }
 }
 
-type DrawGaussians<R: bevy_interleave::prelude::PlanarSync> = (
+type DrawGaussians<R> = (
     SetItemPipeline,
     // SetViewBindGroup<0>,
     SetPreviousViewBindGroup<0>,

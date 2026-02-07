@@ -329,6 +329,7 @@ fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
         + (x * terrain.ramp_slope)
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude
+        + (x * terrain.wave_c_frequency).sin() * terrain.wave_c_amplitude
 }
 
 fn unix_timestamp_seconds() -> u64 {

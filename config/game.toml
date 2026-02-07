@@ -11,6 +11,8 @@ wave_a_amplitude = 2.1
 wave_a_frequency = 0.180
 wave_b_amplitude = 0.9
 wave_b_frequency = 0.558
+wave_c_amplitude = 3.4
+wave_c_frequency = 0.045
 
 [scoring]
 points_per_meter = 1.0

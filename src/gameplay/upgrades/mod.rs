@@ -337,8 +337,11 @@ fn update_upgrade_offer_ui(
     state: Res<UpgradeProgressState>,
     mut root_query: Query<&mut Visibility, With<UpgradeOfferRoot>>,
     mut header_query: Query<&mut Text, With<UpgradeOfferHeaderText>>,
-    mut card_query: Query<(&UpgradeOfferCardSlot, &mut Visibility)>,
-    mut card_text_query: Query<(&UpgradeOfferCardTextSlot, &mut Text)>,
+    mut card_query: Query<(&UpgradeOfferCardSlot, &mut Visibility), Without<UpgradeOfferRoot>>,
+    mut card_text_query: Query<
+        (&UpgradeOfferCardTextSlot, &mut Text),
+        Without<UpgradeOfferHeaderText>,
+    >,
 ) {
     let Ok(mut root_visibility) = root_query.single_mut() else {
         return;

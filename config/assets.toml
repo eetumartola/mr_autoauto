@@ -31,6 +31,10 @@ path = "splats/museum_hall_01.gcloud"
 id = "garage_alley_01"
 path = "splats/garage_alley_01.gcloud"
 
+[[splats]]
+id = "mystical"
+path = "splats/mystical.ply"
+
 [[audio]]
 id = "sfx_player_shot"
 path = "audio/sfx/player_shot.ogg"

@@ -1273,7 +1273,7 @@ fn run_neocortex_chat_to_voice_once(args: &NeocortexJobArgs) -> Result<Neocortex
         character_id: &args.character_id,
         message: &args.prompt,
     };
-    info!(
+    debug!(
         "Neocortex chat prompt (character_id={}, session_id={}):\n{}",
         args.character_id,
         args.session_id.as_deref().unwrap_or("new"),
@@ -1296,7 +1296,7 @@ fn run_neocortex_chat_to_voice_once(args: &NeocortexJobArgs) -> Result<Neocortex
             truncate(&chat_body, 260)
         )
     })?;
-    info!(
+    debug!(
         "Neocortex chat response (character_id={}, session_id={}):\n{}",
         args.character_id,
         chat_response.session_id.as_deref().unwrap_or("new"),

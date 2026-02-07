@@ -1,10 +1,16 @@
 use crate::config::GameConfig;
-use crate::debug::DebugGameplayGuards;
+use crate::debug::{DebugCameraPanState, DebugGameplayGuards};
 use crate::states::GameState;
 use bevy::math::primitives::RegularPolygon;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::f32::consts::{PI, TAU};
+
+#[cfg(feature = "gaussian_splats")]
+use bevy_gaussian_splatting::{
+    sort::SortMode, CloudSettings, Gaussian3d, GaussianCamera, PlanarGaussian3d,
+    PlanarGaussian3dHandle,
+};
 
 const CAMERA_ORTHO_SCALE_METERS: f32 = 0.05;
 const GROUND_WIDTH: f32 = 1_200.0;
@@ -19,6 +25,16 @@ const BACKGROUND_BAND_HEIGHT: f32 = 60.0;
 const BACKGROUND_Y: f32 = 6.0;
 const BACKGROUND_CHECKER_WIDTH: f32 = 13.0;
 const BACKGROUND_CHECKER_HEIGHT: f32 = 13.0;
+#[cfg(feature = "gaussian_splats")]
+const SPLAT_CAMERA_Y_M: f32 = 2.0;
+#[cfg(feature = "gaussian_splats")]
+const SPLAT_CAMERA_Z_M: f32 = 85.0;
+#[cfg(feature = "gaussian_splats")]
+const SPLAT_CAMERA_TARGET_Z_M: f32 = 0.0;
+#[cfg(feature = "gaussian_splats")]
+const SPLAT_BACKGROUND_Z_M: f32 = -120.0;
+#[cfg(feature = "gaussian_splats")]
+const SPLAT_BACKGROUND_Y_OFFSET_M: f32 = -8.5;
 const PLAYER_CHASSIS_SIZE: Vec2 = Vec2::new(3.45, 1.08);
 const PLAYER_TURRET_SIZE: Vec2 = Vec2::new(1.42, 0.52);
 const PLAYER_TURRET_OFFSET_LOCAL: Vec3 = Vec3::new(0.38, 0.66, 0.4);
@@ -93,12 +109,18 @@ impl Plugin for VehicleGameplayPlugin {
                     read_vehicle_input,
                     update_ground_spline_segments,
                     sync_rapier_gravity_from_config,
+                    #[cfg(feature = "gaussian_splats")]
+                    sort_splat_background_by_z_once,
                     apply_vehicle_kinematics,
                     spin_wheel_pairs,
                     update_stunt_metrics,
                     update_player_health_bar,
                     update_vehicle_telemetry,
                     camera_follow_vehicle,
+                    #[cfg(feature = "gaussian_splats")]
+                    sync_splat_background_runtime_from_config,
+                    #[cfg(feature = "gaussian_splats")]
+                    update_splat_background_parallax,
                 )
                     .chain()
                     .run_if(in_state(GameState::InRun))
@@ -131,6 +153,21 @@ struct GroundVisual;
 
 #[derive(Component)]
 struct BackgroundVisual;
+
+#[cfg(feature = "gaussian_splats")]
+#[derive(Component)]
+struct SplatBackgroundCloud;
+
+#[cfg(feature = "gaussian_splats")]
+#[derive(Component)]
+struct SplatBackgroundSorted;
+
+#[cfg(feature = "gaussian_splats")]
+#[derive(Component, Debug, Clone, Copy)]
+struct SplatBackgroundCamera {
+    parallax: f32,
+    loop_length_m: f32,
+}
 
 #[derive(Component)]
 struct GroundSplineSegment {
@@ -307,12 +344,16 @@ fn spawn_vehicle_scene(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     config: Res<GameConfig>,
+    asset_server: Res<AssetServer>,
     camera_query: Query<Entity, With<Camera2d>>,
     existing_player: Query<Entity, With<PlayerVehicle>>,
     existing_ground: Query<Entity, With<GroundVisual>>,
     existing_background: Query<Entity, With<BackgroundVisual>>,
     existing_yardstick: Query<Entity, With<YardstickVisualRoot>>,
 ) {
+    #[cfg(not(feature = "gaussian_splats"))]
+    let _ = &asset_server;
+
     if existing_player.is_empty() {
         let Some(vehicle) = config.vehicles_by_id.get(&config.game.app.default_vehicle) else {
             return;
@@ -534,43 +575,56 @@ fn spawn_vehicle_scene(
     }
 
     if existing_background.is_empty() {
-        let background_entity = commands
-            .spawn((
-                Name::new("BackgroundVisual"),
-                BackgroundVisual,
-                Sprite::from_color(
-                    Color::srgb(0.07, 0.09, 0.12),
-                    Vec2::new(BACKGROUND_WIDTH, BACKGROUND_BAND_HEIGHT),
-                ),
-                Transform::from_xyz(BACKGROUND_WIDTH * 0.0, BACKGROUND_Y, -20.0),
-                Visibility::Inherited,
-                InheritedVisibility::VISIBLE,
-                ViewVisibility::default(),
-            ))
-            .id();
-
-        let bg_checker_count = (BACKGROUND_WIDTH / BACKGROUND_CHECKER_WIDTH).ceil() as i32 + 2;
-        let bg_start_x = -(BACKGROUND_WIDTH * 0.5);
-
-        commands.entity(background_entity).with_children(|parent| {
-            for index in 0..bg_checker_count {
-                let x = bg_start_x + ((index as f32 + 0.5) * BACKGROUND_CHECKER_WIDTH);
-                let color = if index % 2 == 0 {
-                    Color::srgb(0.10, 0.13, 0.17)
-                } else {
-                    Color::srgb(0.06, 0.08, 0.11)
-                };
-
-                parent.spawn((
-                    Name::new("BackgroundCheckerTile"),
-                    Sprite::from_color(
-                        color,
-                        Vec2::new(BACKGROUND_CHECKER_WIDTH, BACKGROUND_CHECKER_HEIGHT),
-                    ),
-                    Transform::from_xyz(x, 0.0, 0.1),
-                ));
+        let spawned_splat_background = {
+            #[cfg(feature = "gaussian_splats")]
+            {
+                spawn_gaussian_splat_background(&mut commands, &config, &asset_server)
             }
-        });
+            #[cfg(not(feature = "gaussian_splats"))]
+            {
+                false
+            }
+        };
+
+        if !spawned_splat_background {
+            let background_entity = commands
+                .spawn((
+                    Name::new("BackgroundVisual"),
+                    BackgroundVisual,
+                    Sprite::from_color(
+                        Color::srgb(0.07, 0.09, 0.12),
+                        Vec2::new(BACKGROUND_WIDTH, BACKGROUND_BAND_HEIGHT),
+                    ),
+                    Transform::from_xyz(BACKGROUND_WIDTH * 0.0, BACKGROUND_Y, -20.0),
+                    Visibility::Inherited,
+                    InheritedVisibility::VISIBLE,
+                    ViewVisibility::default(),
+                ))
+                .id();
+
+            let bg_checker_count = (BACKGROUND_WIDTH / BACKGROUND_CHECKER_WIDTH).ceil() as i32 + 2;
+            let bg_start_x = -(BACKGROUND_WIDTH * 0.5);
+
+            commands.entity(background_entity).with_children(|parent| {
+                for index in 0..bg_checker_count {
+                    let x = bg_start_x + ((index as f32 + 0.5) * BACKGROUND_CHECKER_WIDTH);
+                    let color = if index % 2 == 0 {
+                        Color::srgb(0.10, 0.13, 0.17)
+                    } else {
+                        Color::srgb(0.06, 0.08, 0.11)
+                    };
+
+                    parent.spawn((
+                        Name::new("BackgroundCheckerTile"),
+                        Sprite::from_color(
+                            color,
+                            Vec2::new(BACKGROUND_CHECKER_WIDTH, BACKGROUND_CHECKER_HEIGHT),
+                        ),
+                        Transform::from_xyz(x, 0.0, 0.1),
+                    ));
+                }
+            });
+        }
     }
 
     if existing_yardstick.is_empty() {
@@ -1179,6 +1233,7 @@ fn camera_follow_vehicle(
     time: Res<Time>,
     telemetry: Res<VehicleTelemetry>,
     config: Res<GameConfig>,
+    debug_camera_pan: Option<Res<DebugCameraPanState>>,
     mut follow_state: ResMut<CameraFollowState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
     mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<PlayerVehicle>)>,
@@ -1193,6 +1248,7 @@ fn camera_follow_vehicle(
     let Ok(mut camera_transform) = camera_query.single_mut() else {
         return;
     };
+    let pan_offset = debug_camera_pan.map(|pan| pan.offset_x_m).unwrap_or(0.0);
     let target_look_ahead_m = (telemetry.speed_mps * vehicle.camera_look_ahead_factor)
         .clamp(vehicle.camera_look_ahead_min, vehicle.camera_look_ahead_max);
     let dt = time.delta_secs().max(0.000_1);
@@ -1200,14 +1256,16 @@ fn camera_follow_vehicle(
     if !follow_state.initialized {
         follow_state.initialized = true;
         follow_state.look_ahead_m = target_look_ahead_m;
-        camera_transform.translation.x = player_transform.translation.x + target_look_ahead_m;
+        camera_transform.translation.x =
+            player_transform.translation.x + target_look_ahead_m + pan_offset;
     } else {
         follow_state.look_ahead_m = move_towards(
             follow_state.look_ahead_m,
             target_look_ahead_m,
             max_look_ahead_step,
         );
-        let target_camera_x = player_transform.translation.x + follow_state.look_ahead_m;
+        let target_camera_x =
+            player_transform.translation.x + follow_state.look_ahead_m + pan_offset;
         let camera_blend = (CAMERA_FOLLOW_SMOOTH_RATE_HZ * dt).clamp(0.0, 1.0);
         camera_transform.translation.x = camera_transform
             .translation
@@ -1216,6 +1274,176 @@ fn camera_follow_vehicle(
     }
     camera_transform.translation.y = CAMERA_Y;
     camera_transform.translation.z = CAMERA_Z;
+}
+
+#[cfg(feature = "gaussian_splats")]
+#[allow(clippy::type_complexity)]
+fn update_splat_background_parallax(
+    gameplay_camera_query: Query<&Transform, (With<Camera2d>, Without<SplatBackgroundCamera>)>,
+    mut splat_camera_query: Query<
+        (&SplatBackgroundCamera, &mut Transform),
+        (With<SplatBackgroundCamera>, Without<Camera2d>),
+    >,
+) {
+    let Ok(gameplay_camera) = gameplay_camera_query.single() else {
+        return;
+    };
+
+    for (settings, mut transform) in &mut splat_camera_query {
+        let mut parallax_x = gameplay_camera.translation.x * settings.parallax;
+        if settings.loop_length_m > f32::EPSILON {
+            parallax_x = parallax_x.rem_euclid(settings.loop_length_m);
+        }
+        transform.translation.x = parallax_x;
+    }
+}
+
+#[cfg(feature = "gaussian_splats")]
+fn sync_splat_background_runtime_from_config(
+    config: Res<GameConfig>,
+    mut camera_query: Query<&mut SplatBackgroundCamera>,
+    mut cloud_query: Query<&mut Transform, With<SplatBackgroundCloud>>,
+) {
+    let Some(first_segment) = config.segments.segment_sequence.first() else {
+        return;
+    };
+    let Some(background_cfg) = config.backgrounds_by_id.get(&first_segment.id) else {
+        return;
+    };
+
+    for mut camera in &mut camera_query {
+        camera.parallax = background_cfg.parallax;
+        camera.loop_length_m = background_cfg.loop_length_m.max(0.0);
+    }
+
+    for mut transform in &mut cloud_query {
+        transform.translation = Vec3::new(
+            background_cfg.offset_x_m,
+            SPLAT_BACKGROUND_Y_OFFSET_M + background_cfg.offset_y_m,
+            SPLAT_BACKGROUND_Z_M + background_cfg.offset_z_m,
+        );
+        transform.scale = Vec3::new(
+            background_cfg.scale_x,
+            background_cfg.scale_y,
+            background_cfg.scale_z,
+        );
+    }
+}
+
+#[cfg(feature = "gaussian_splats")]
+#[allow(clippy::type_complexity)]
+fn sort_splat_background_by_z_once(
+    mut commands: Commands,
+    mut cloud_assets: ResMut<Assets<PlanarGaussian3d>>,
+    cloud_query: Query<
+        (Entity, &PlanarGaussian3dHandle),
+        (With<SplatBackgroundCloud>, Without<SplatBackgroundSorted>),
+    >,
+) {
+    for (entity, cloud_handle) in &cloud_query {
+        let Some(cloud) = cloud_assets.get_mut(&cloud_handle.0) else {
+            continue;
+        };
+
+        let mut packed: Vec<Gaussian3d> = cloud.iter().collect();
+        packed.sort_by(|left, right| {
+            right.position_visibility.position[2].total_cmp(&left.position_visibility.position[2])
+        });
+        *cloud = PlanarGaussian3d::from(packed);
+
+        commands.entity(entity).insert(SplatBackgroundSorted);
+        info!("Sorted splat background by +z once; runtime sort disabled for that cloud.");
+    }
+}
+
+#[cfg(feature = "gaussian_splats")]
+fn spawn_gaussian_splat_background(
+    commands: &mut Commands,
+    config: &GameConfig,
+    asset_server: &AssetServer,
+) -> bool {
+    let Some(first_segment) = config.segments.segment_sequence.first() else {
+        return false;
+    };
+    let Some(background_cfg) = config.backgrounds_by_id.get(&first_segment.id) else {
+        return false;
+    };
+    let Some(splat_asset_id) = background_cfg.splat_asset_id.as_deref() else {
+        return false;
+    };
+    let Some(splat_asset_cfg) = config.splat_assets_by_id.get(splat_asset_id) else {
+        warn!(
+            "Background `{}` references missing splat asset `{splat_asset_id}`.",
+            background_cfg.id
+        );
+        return false;
+    };
+
+    let splat_handle: Handle<PlanarGaussian3d> = asset_server.load(splat_asset_cfg.path.clone());
+    let parallax = background_cfg.parallax;
+    let offset_x_m = background_cfg.offset_x_m;
+    let offset_y_m = background_cfg.offset_y_m;
+    let offset_z_m = background_cfg.offset_z_m;
+    let loop_length_m = background_cfg.loop_length_m.max(0.0);
+    let root_entity = commands
+        .spawn((
+            Name::new("BackgroundVisual"),
+            BackgroundVisual,
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::Inherited,
+            InheritedVisibility::VISIBLE,
+            ViewVisibility::default(),
+        ))
+        .id();
+
+    commands.entity(root_entity).with_children(|parent| {
+        parent.spawn((
+            Name::new("SplatBackgroundCloud"),
+            SplatBackgroundCloud,
+            PlanarGaussian3dHandle(splat_handle),
+            CloudSettings {
+                sort_mode: SortMode::None,
+                aabb: false,
+                visualize_bounding_box: false,
+                ..default()
+            },
+            Transform::from_xyz(
+                offset_x_m,
+                SPLAT_BACKGROUND_Y_OFFSET_M + offset_y_m,
+                SPLAT_BACKGROUND_Z_M + offset_z_m,
+            )
+            .with_scale(Vec3::new(
+                background_cfg.scale_x,
+                background_cfg.scale_y,
+                background_cfg.scale_z,
+            )),
+        ));
+
+        parent.spawn((
+            Name::new("SplatBackgroundCamera"),
+            SplatBackgroundCamera {
+                parallax,
+                loop_length_m,
+            },
+            GaussianCamera::default(),
+            Camera3d::default(),
+            Camera {
+                order: 0,
+                ..default()
+            },
+            Transform::from_xyz(0.0, SPLAT_CAMERA_Y_M, SPLAT_CAMERA_Z_M).looking_at(
+                Vec3::new(0.0, SPLAT_CAMERA_Y_M, SPLAT_CAMERA_TARGET_Z_M),
+                Vec3::Y,
+            ),
+        ));
+    });
+
+    info!(
+        "Spawned splat background `{}` from `{}` with parallax {}.",
+        splat_asset_id, splat_asset_cfg.path, parallax
+    );
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1356,6 +1584,7 @@ fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
         + (x * terrain.ramp_slope)
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude
+        + (x * terrain.wave_c_frequency).sin() * terrain.wave_c_amplitude
 }
 
 fn shortest_angle_delta_rad(current: f32, previous: f32) -> f32 {

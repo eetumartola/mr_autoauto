@@ -182,6 +182,45 @@ impl GameConfig {
             }
         }
 
+        for (index, background) in self.backgrounds.backgrounds.iter().enumerate() {
+            if !background.parallax.is_finite() {
+                return Err(ConfigError::Validation(format!(
+                    "backgrounds.toml::backgrounds[{index}].parallax must be finite"
+                )));
+            }
+            if !background.offset_x_m.is_finite()
+                || !background.offset_y_m.is_finite()
+                || !background.offset_z_m.is_finite()
+            {
+                return Err(ConfigError::Validation(format!(
+                    "backgrounds.toml::backgrounds[{index}] offsets must be finite"
+                )));
+            }
+            if !background.scale_x.is_finite()
+                || !background.scale_y.is_finite()
+                || !background.scale_z.is_finite()
+                || background.scale_x.abs() <= f32::EPSILON
+                || background.scale_y.abs() <= f32::EPSILON
+                || background.scale_z.abs() <= f32::EPSILON
+            {
+                return Err(ConfigError::Validation(format!(
+                    "backgrounds.toml::backgrounds[{index}] scales must be finite and non-zero (negative values are allowed for axis flips)"
+                )));
+            }
+            if !background.loop_length_m.is_finite() || background.loop_length_m < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "backgrounds.toml::backgrounds[{index}].loop_length_m must be >= 0"
+                )));
+            }
+            if let Some(splat_asset_id) = background.splat_asset_id.as_deref() {
+                if !self.splat_assets_by_id.contains_key(splat_asset_id) {
+                    return Err(ConfigError::Validation(format!(
+                        "backgrounds.toml::backgrounds[{index}].splat_asset_id references unknown splat id `{splat_asset_id}`"
+                    )));
+                }
+            }
+        }
+
         for (index, enemy) in self.enemy_types.enemy_types.iter().enumerate() {
             if !self.weapons_by_id.contains_key(&enemy.weapon_id) {
                 return Err(ConfigError::Validation(format!(
@@ -451,7 +490,13 @@ impl GameConfig {
             }
         }
 
-        if self.game.terrain.wave_a_frequency < 0.0 || self.game.terrain.wave_b_frequency < 0.0 {
+        if !self.game.terrain.wave_a_frequency.is_finite()
+            || !self.game.terrain.wave_b_frequency.is_finite()
+            || !self.game.terrain.wave_c_frequency.is_finite()
+            || self.game.terrain.wave_a_frequency < 0.0
+            || self.game.terrain.wave_b_frequency < 0.0
+            || self.game.terrain.wave_c_frequency < 0.0
+        {
             return Err(ConfigError::Validation(
                 "game.toml::terrain wave frequencies must be >= 0".to_string(),
             ));
@@ -913,6 +958,18 @@ pub struct TerrainConfig {
     pub wave_a_frequency: f32,
     pub wave_b_amplitude: f32,
     pub wave_b_frequency: f32,
+    #[serde(default = "default_terrain_wave_c_amplitude")]
+    pub wave_c_amplitude: f32,
+    #[serde(default = "default_terrain_wave_c_frequency")]
+    pub wave_c_frequency: f32,
+}
+
+fn default_terrain_wave_c_amplitude() -> f32 {
+    0.0
+}
+
+fn default_terrain_wave_c_frequency() -> f32 {
+    0.0
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1254,6 +1311,50 @@ pub struct BackgroundConfig {
     pub placeholder: String,
     pub color: [f32; 3],
     pub parallax: f32,
+    #[serde(default)]
+    pub splat_asset_id: Option<String>,
+    #[serde(default = "default_background_offset_x_m")]
+    pub offset_x_m: f32,
+    #[serde(default = "default_background_offset_y_m")]
+    pub offset_y_m: f32,
+    #[serde(default = "default_background_offset_z_m")]
+    pub offset_z_m: f32,
+    #[serde(default = "default_background_scale_x")]
+    pub scale_x: f32,
+    #[serde(default = "default_background_scale_y")]
+    pub scale_y: f32,
+    #[serde(default = "default_background_scale_z")]
+    pub scale_z: f32,
+    #[serde(default = "default_background_loop_length_m")]
+    pub loop_length_m: f32,
+}
+
+fn default_background_offset_x_m() -> f32 {
+    0.0
+}
+
+fn default_background_offset_y_m() -> f32 {
+    0.0
+}
+
+fn default_background_offset_z_m() -> f32 {
+    0.0
+}
+
+fn default_background_scale_x() -> f32 {
+    1.0
+}
+
+fn default_background_scale_y() -> f32 {
+    1.0
+}
+
+fn default_background_scale_z() -> f32 {
+    1.0
+}
+
+fn default_background_loop_length_m() -> f32 {
+    0.0
 }
 
 impl HasId for BackgroundConfig {
@@ -1781,6 +1882,8 @@ mod tests {
                     wave_a_frequency: 0.015,
                     wave_b_amplitude: 20.0,
                     wave_b_frequency: 0.041,
+                    wave_c_amplitude: 0.0,
+                    wave_c_frequency: 0.0,
                 },
                 scoring: ScoringConfig::default(),
                 pickups: PickupConfig::default(),
@@ -1801,6 +1904,14 @@ mod tests {
                     placeholder: "box".to_string(),
                     color: [0.1, 0.1, 0.1],
                     parallax: 0.4,
+                    splat_asset_id: None,
+                    offset_x_m: 0.0,
+                    offset_y_m: 0.0,
+                    offset_z_m: 0.0,
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    scale_z: 1.0,
+                    loop_length_m: 0.0,
                 }],
             },
             environments: EnvironmentsFile {
@@ -1992,6 +2103,14 @@ mod tests {
                     placeholder: "box".to_string(),
                     color: [0.1, 0.1, 0.1],
                     parallax: 0.4,
+                    splat_asset_id: None,
+                    offset_x_m: 0.0,
+                    offset_y_m: 0.0,
+                    offset_z_m: 0.0,
+                    scale_x: 1.0,
+                    scale_y: 1.0,
+                    scale_z: 1.0,
+                    loop_length_m: 0.0,
                 },
             )]),
             environments_by_id: HashMap::from([(

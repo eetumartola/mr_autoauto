@@ -306,7 +306,9 @@ environment = "ice"
 **Goal:** splat segments are first-class gameplay segments, concatenated linearly.
 
 **Tasks**
-- [not started] E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
+- [in progress] E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
+  - first splat asset hook is active via `backgrounds.toml::splat_asset_id` + `assets.toml::splats` for `museum_hall_01`.
+  - [done] Added background placement tuning workflow (`B` debug panel): live `parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m` edits + `Apply To backgrounds.toml`.
 - [not started] E2. Segment placement:
   - concatenate along +x; maintain a "segment cursor" at current distance.
 - [not started] E3. Streaming:
@@ -430,8 +432,9 @@ environment = "ice"
 - Placeholder backgrounds are required now (simple quads/polygons), not real splat content yet.
 - Version pinning: Bevy 0.17 and bevy_gaussian_splatting v6.0.
 - Rust toolchain pinning for Bevy 0.17 compatibility: `rustc/cargo 1.88.0`.
-- `bevy_gaussian_splatting v6.0` currently requires nightly Rust when compiled; keep it feature-gated (`gaussian_splats`) and disabled for now.
+- `bevy_gaussian_splatting v6.0` is now integrated on stable via the vendored patch crate and enabled in default builds.
 - Long-term splat strategy: use a vendored/patch-crate version of `bevy_gaussian_splatting v6.0.0` without the nightly-only `#![feature(lazy_type_alias)]` gate, so builds stay on stable toolchain.
+- Vendored splat plugin maintenance: removed non-enforced type-alias generic bounds that caused recurring `type_alias_bounds` warnings during `cargo check` / `clippy`.
 - A2 implementation detail: `config/*.toml` is now loaded/merged at startup with fail-fast validation for cross-file IDs (environment, weapon, enemy, vehicle, spawner).
 - A3 implementation detail: press `F5` in-game to hot-reload all `config/*.toml`; invalid reloads are rejected and previous in-memory config stays active.
 - A4 implementation detail: `assets.toml` now defines sprite/model/splat/audio catalogs; model entries include hierarchy metadata (`root_node`, `wheel_nodes`, optional `turret_node`) for vehicle-style compositions.
@@ -559,6 +562,15 @@ environment = "ice"
 - Pickup tuning data update: pickup/drop behavior is now data-driven under `game.toml::[pickups]` (spawn chance, heal amount, score scaling, collection radius, lifetimes, gravity/bounce/spread, and visual size/radius knobs) for hot-reload iteration.
 - Epic F3/F4 MVP update: upgrade offers now trigger every 5 coin pickups (configurable) with two random in-run choices from (`health +10`, `gun fire rate +10%`, `missile fire rate +10%`), fully driven by `game.toml::[run_upgrades]` for future upgrade-list expansion.
 - Upgrade UX update: when an upgrade offer appears, gameplay now pauses and a centered 2-card choice overlay is shown; player picks left/right via `A/D` or arrow keys, and held input from before offer-open is ignored until keys are released and newly pressed.
+- Splat background prototype update: added `assets/splats/mystical.ply` as the first renderable Gaussian background for `museum_hall_01`, with parallax camera motion and one-time +Z depth sort at load (`SortMode::None` at runtime to avoid per-frame sorting).
+- Background tuning workflow update: added a `B`-toggled debug window for active segment background parameters (`parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m`) with live runtime edits and `Apply To backgrounds.toml` persistence.
+- Background transform update: background scales now allow negative values (non-zero required) so axis flips (for example Y-flip) can be done directly from config/debug tuning.
+- Terrain profile update: added a third long-wave sine layer (`wave_c_amplitude`, `wave_c_frequency`) to terrain sampling so coarse macro undulation can be tuned separately from medium/high frequency detail.
+- Debug camera utility update: added `O/P` horizontal camera pan (persistent offset) for runtime inspection while driving; overlay/help text now shows this control.
+- Commentary logging update: Neocortex prompt/response dumps were moved from `info!` to `debug!` so normal logs stay clean.
+- Splat camera motion update: parallax is now driven from the existing smoothed 2D gameplay camera transform (not raw player position), removing the double-motion feel; background X placement remains on the cloud transform.
+- Splat asset loading fix: asset registry now preloads Gaussian scene handles only for `.json` scene files; `.ply` / `.gcloud` paths are no longer sent through `GaussianSceneLoader`, eliminating repeated "only .json supported" load errors.
+- HUD/loading flow update: removed commentary debug diagnostics from the on-screen debug overlay, added run stats visibility (`score`, `kills`, `coins`, `health pickups`, stunt totals), and changed `Loading -> InRun` transition to wait for configured assets plus preloaded splat clouds to reach loaded/failed state before starting gameplay.
 
 ---
 ## 7) Recommended build sequence (milestones)

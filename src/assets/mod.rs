@@ -221,12 +221,13 @@ pub struct SplatAssetEntry {
 impl SplatAssetEntry {
     fn from_config(
         config: &SplatAssetConfig,
-        _asset_server: &AssetServer,
+        asset_server: &AssetServer,
         asset_root: &Path,
     ) -> Self {
         let exists_on_disk = asset_exists(asset_root, &config.path);
         #[cfg(feature = "gaussian_splats")]
-        let handle = exists_on_disk.then(|| _asset_server.load(config.path.clone()));
+        let handle = (exists_on_disk && gaussian_scene_loader_supports_path(&config.path))
+            .then(|| asset_server.load(config.path.clone()));
 
         Self {
             path: config.path.clone(),
@@ -264,4 +265,12 @@ impl AudioAssetEntry {
 fn asset_exists(asset_root: &Path, path: &str) -> bool {
     let file_path = path.split('#').next().unwrap_or(path);
     asset_root.join(file_path).exists()
+}
+
+#[cfg(feature = "gaussian_splats")]
+fn gaussian_scene_loader_supports_path(path: &str) -> bool {
+    path.split('#')
+        .next()
+        .map(|base| base.to_ascii_lowercase().ends_with(".json"))
+        .unwrap_or(false)
 }

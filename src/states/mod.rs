@@ -1,3 +1,4 @@
+use crate::assets::AssetRegistry;
 use crate::config::GameConfig;
 use crate::gameplay::combat::EnemyKilledEvent;
 use crate::gameplay::pickups::{PickupCollectedEvent, PickupKind};
@@ -7,6 +8,10 @@ use crate::gameplay::vehicle::{
 use bevy::app::AppExit;
 use bevy::asset::LoadState;
 use bevy::prelude::*;
+use std::collections::HashSet;
+
+#[cfg(feature = "gaussian_splats")]
+use bevy_gaussian_splatting::PlanarGaussian3d;
 
 const LOADING_LOGO_PATH: &str = "sprites/autoauto_logo.jpg";
 const MIN_LOADING_SCREEN_SECONDS: f64 = 0.75;
@@ -71,36 +76,45 @@ struct ResultsScreenRoot;
 struct LoadingScreenState {
     entered_at_s: f64,
     logo_handle: Handle<Image>,
+    #[cfg(feature = "gaussian_splats")]
+    splat_cloud_handles: Vec<Handle<PlanarGaussian3d>>,
 }
 
 #[derive(Resource, Debug, Clone, Default)]
-struct RunSummary {
-    score: u32,
-    distance_m: f32,
-    distance_score: u32,
-    kill_score: u32,
-    pickup_score: u32,
-    stunt_score: u32,
-    airtime_score: u32,
-    wheelie_score: u32,
-    flip_score: u32,
-    no_damage_bonus_score: u32,
-    kill_count: u32,
-    coin_pickup_count: u32,
-    health_pickup_count: u32,
-    total_health_restored: f32,
-    total_airtime_s: f32,
-    total_wheelie_s: f32,
-    flip_count: u32,
-    big_jump_count: u32,
-    huge_jump_count: u32,
-    long_wheelie_count: u32,
-    took_damage: bool,
-    was_game_over: bool,
+pub struct RunSummary {
+    pub score: u32,
+    pub distance_m: f32,
+    pub distance_score: u32,
+    pub kill_score: u32,
+    pub pickup_score: u32,
+    pub stunt_score: u32,
+    pub airtime_score: u32,
+    pub wheelie_score: u32,
+    pub flip_score: u32,
+    pub no_damage_bonus_score: u32,
+    pub kill_count: u32,
+    pub coin_pickup_count: u32,
+    pub health_pickup_count: u32,
+    pub total_health_restored: f32,
+    pub total_airtime_s: f32,
+    pub total_wheelie_s: f32,
+    pub flip_count: u32,
+    pub big_jump_count: u32,
+    pub huge_jump_count: u32,
+    pub long_wheelie_count: u32,
+    pub took_damage: bool,
+    pub was_game_over: bool,
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: bevy::camera::ClearColorConfig::None,
+            ..default()
+        },
+    ));
 }
 
 fn enter_boot() {
@@ -111,13 +125,22 @@ fn boot_to_loading(mut next_state: ResMut<NextState<GameState>>) {
     next_state.set(GameState::Loading);
 }
 
-fn enter_loading(mut commands: Commands, asset_server: Res<AssetServer>, time: Res<Time>) {
+fn enter_loading(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+    config: Res<GameConfig>,
+) {
     info!("Entered state: Loading");
     let logo_handle = asset_server.load(LOADING_LOGO_PATH);
+    #[cfg(feature = "gaussian_splats")]
+    let splat_cloud_handles = preload_splat_cloud_handles(&asset_server, &config);
 
     commands.insert_resource(LoadingScreenState {
         entered_at_s: time.elapsed_secs_f64(),
         logo_handle: logo_handle.clone(),
+        #[cfg(feature = "gaussian_splats")]
+        splat_cloud_handles,
     });
 
     commands.spawn((
@@ -141,6 +164,7 @@ fn cleanup_loading_screen(
 fn loading_to_in_run(
     time: Res<Time>,
     asset_server: Res<AssetServer>,
+    registry: Option<Res<AssetRegistry>>,
     loading_state: Option<Res<LoadingScreenState>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
@@ -163,11 +187,86 @@ fn loading_to_in_run(
         return;
     }
 
+    let Some(registry) = registry else {
+        return;
+    };
+    if !asset_registry_ready(&asset_server, &registry) {
+        return;
+    }
+
+    #[cfg(feature = "gaussian_splats")]
+    if !loading_state
+        .splat_cloud_handles
+        .iter()
+        .all(|handle| asset_loaded_or_failed(&asset_server, handle))
+    {
+        return;
+    }
+
     if logo_failed {
         warn!("Loading logo failed to load, continuing to run state.");
     }
 
     next_state.set(GameState::InRun);
+}
+
+fn asset_registry_ready(asset_server: &AssetServer, registry: &AssetRegistry) -> bool {
+    let core_assets_ready = registry
+        .sprites
+        .values()
+        .filter_map(|entry| entry.handle.as_ref())
+        .all(|handle| asset_loaded_or_failed(asset_server, handle))
+        && registry
+            .models
+            .values()
+            .filter_map(|entry| entry.handle.as_ref())
+            .all(|handle| asset_loaded_or_failed(asset_server, handle))
+        && registry
+            .audio
+            .values()
+            .filter_map(|entry| entry.handle.as_ref())
+            .all(|handle| asset_loaded_or_failed(asset_server, handle));
+
+    #[cfg(feature = "gaussian_splats")]
+    let splats_ready = registry
+        .splats
+        .values()
+        .filter_map(|entry| entry.handle.as_ref())
+        .all(|handle| asset_loaded_or_failed(asset_server, handle));
+
+    #[cfg(not(feature = "gaussian_splats"))]
+    let splats_ready = true;
+
+    core_assets_ready && splats_ready
+}
+
+fn asset_loaded_or_failed<T: Asset>(asset_server: &AssetServer, handle: &Handle<T>) -> bool {
+    asset_server.is_loaded_with_dependencies(handle.id())
+        || matches!(asset_server.load_state(handle.id()), LoadState::Failed(_))
+}
+
+#[cfg(feature = "gaussian_splats")]
+fn preload_splat_cloud_handles(
+    asset_server: &AssetServer,
+    config: &GameConfig,
+) -> Vec<Handle<PlanarGaussian3d>> {
+    let mut unique_paths = HashSet::<String>::new();
+    let mut handles = Vec::<Handle<PlanarGaussian3d>>::new();
+    for segment in &config.segments.segment_sequence {
+        let Some(background) = config.backgrounds_by_id.get(&segment.id) else {
+            continue;
+        };
+        let Some(splat_id) = background.splat_asset_id.as_deref() else {
+            continue;
+        };
+        let Some(splat_asset) = config.splat_assets_by_id.get(splat_id) else {
+            continue;
+        };
+        if unique_paths.insert(splat_asset.path.clone()) {
+            handles.push(asset_server.load(splat_asset.path.clone()));
+        }
+    }
+    handles
 }
 
 fn enter_in_run(mut run_summary: ResMut<RunSummary>) {

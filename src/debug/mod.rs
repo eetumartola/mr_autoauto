@@ -1,9 +1,8 @@
-use crate::commentary_stub::CommentaryStubState;
-use crate::config::{GameConfig, VehicleConfig};
+use crate::config::{BackgroundConfig, GameConfig, VehicleConfig};
 use crate::gameplay::vehicle::{
     PlayerVehicle, VehicleInputState, VehicleStuntMetrics, VehicleTelemetry,
 };
-use crate::states::GameState;
+use crate::states::{GameState, RunSummary};
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
@@ -17,12 +16,21 @@ impl Plugin for DebugOverlayPlugin {
         app.init_resource::<DebugRunStats>()
             .init_resource::<KeybindOverlayState>()
             .init_resource::<DebugGameplayGuards>()
+            .init_resource::<DebugCameraPanState>()
             .init_resource::<VehicleTuningPanelState>()
+            .init_resource::<BackgroundTuningPanelState>()
             .add_systems(Update, spawn_debug_overlay)
             .add_systems(Update, toggle_keybind_overlay)
             .add_systems(Update, toggle_vehicle_tuning_panel)
+            .add_systems(Update, toggle_background_tuning_panel)
             .add_systems(Update, sync_keybind_overlay_visibility)
             .add_systems(OnEnter(GameState::InRun), reset_run_stats)
+            .add_systems(
+                Update,
+                update_debug_camera_pan
+                    .run_if(in_state(GameState::InRun))
+                    .run_if(resource_exists::<GameConfig>),
+            )
             .add_systems(
                 Update,
                 (update_run_stats, update_debug_overlay_text)
@@ -31,7 +39,7 @@ impl Plugin for DebugOverlayPlugin {
             )
             .add_systems(
                 EguiPrimaryContextPass,
-                vehicle_tuning_panel_ui
+                (vehicle_tuning_panel_ui, background_tuning_panel_ui)
                     .run_if(in_state(GameState::InRun))
                     .run_if(resource_exists::<GameConfig>),
             );
@@ -42,6 +50,13 @@ impl Plugin for DebugOverlayPlugin {
 pub struct DebugGameplayGuards {
     pub player_invulnerable: bool,
 }
+
+#[derive(Resource, Debug, Clone, Copy, Default)]
+pub struct DebugCameraPanState {
+    pub offset_x_m: f32,
+}
+
+const DEBUG_CAMERA_PAN_SPEED_MPS: f32 = 70.0;
 
 #[derive(Component)]
 struct DebugOverlayText;
@@ -191,6 +206,52 @@ struct VehicleTuningPanelState {
     status: String,
 }
 
+#[derive(Debug, Clone)]
+struct BackgroundTuningParams {
+    parallax: f32,
+    offset_x_m: f32,
+    offset_y_m: f32,
+    offset_z_m: f32,
+    scale_x: f32,
+    scale_y: f32,
+    scale_z: f32,
+    loop_length_m: f32,
+}
+
+impl BackgroundTuningParams {
+    fn from_background(background: &BackgroundConfig) -> Self {
+        Self {
+            parallax: background.parallax,
+            offset_x_m: background.offset_x_m,
+            offset_y_m: background.offset_y_m,
+            offset_z_m: background.offset_z_m,
+            scale_x: background.scale_x,
+            scale_y: background.scale_y,
+            scale_z: background.scale_z,
+            loop_length_m: background.loop_length_m,
+        }
+    }
+
+    fn apply_to_background(&self, background: &mut BackgroundConfig) {
+        background.parallax = self.parallax;
+        background.offset_x_m = self.offset_x_m;
+        background.offset_y_m = self.offset_y_m;
+        background.offset_z_m = self.offset_z_m;
+        background.scale_x = self.scale_x;
+        background.scale_y = self.scale_y;
+        background.scale_z = self.scale_z;
+        background.loop_length_m = self.loop_length_m;
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+struct BackgroundTuningPanelState {
+    visible: bool,
+    source_background_id: String,
+    params: Option<BackgroundTuningParams>,
+    status: String,
+}
+
 fn spawn_debug_overlay(
     mut commands: Commands,
     keybind_overlay: Res<KeybindOverlayState>,
@@ -290,15 +351,41 @@ fn update_run_stats(
     run_stats.active_segment_id = active_segment;
 }
 
+fn update_debug_camera_pan(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    config: Res<GameConfig>,
+    mut pan_state: ResMut<DebugCameraPanState>,
+) {
+    if !config.game.app.debug_overlay {
+        pan_state.offset_x_m = 0.0;
+        return;
+    }
+
+    let mut axis = 0.0_f32;
+    if keyboard.pressed(KeyCode::KeyO) {
+        axis -= 1.0;
+    }
+    if keyboard.pressed(KeyCode::KeyP) {
+        axis += 1.0;
+    }
+
+    if axis.abs() > f32::EPSILON {
+        pan_state.offset_x_m += axis * DEBUG_CAMERA_PAN_SPEED_MPS * time.delta_secs();
+        pan_state.offset_x_m = pan_state.offset_x_m.clamp(-3_000.0, 3_000.0);
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_debug_overlay_text(
     diagnostics: Res<DiagnosticsStore>,
     run_stats: Res<DebugRunStats>,
     enemy_query: Query<(), With<EnemyDebugMarker>>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
-    commentary: Option<Res<CommentaryStubState>>,
+    run_summary: Option<Res<RunSummary>>,
     input_state: Option<Res<VehicleInputState>>,
     stunts: Option<Res<VehicleStuntMetrics>>,
+    camera_pan: Res<DebugCameraPanState>,
     mut overlay_query: Query<&mut Text, With<DebugOverlayText>>,
 ) {
     let Ok(mut text) = overlay_query.single_mut() else {
@@ -320,82 +407,26 @@ fn update_debug_overlay_text(
         .unwrap_or((false, false));
 
     let (
-        queue_len,
-        last_line,
-        pending_speaker,
-        pending_chat_emotion,
-        pending_voice_emotion,
-        next_summary,
-        prompt_preview,
-        commentary_api_status,
-        commentary_audio_path,
-    ) = match commentary {
-        Some(state) => {
-            let line = if state.last_line.is_empty() {
-                "n/a".to_string()
-            } else if state.last_speaker.is_empty() {
-                state.last_line.clone()
-            } else {
-                format!("{}: {}", state.last_speaker, state.last_line)
-            };
-            let pending_speaker = if state.pending_speaker_id.is_empty() {
-                "n/a".to_string()
-            } else {
-                state.pending_speaker_id.clone()
-            };
-            let chat_emotion = if state.pending_chat_emotion.is_empty() {
-                "n/a".to_string()
-            } else {
-                state.pending_chat_emotion.clone()
-            };
-            let voice_emotion = if state.pending_voice_emotion.is_empty() {
-                "n/a".to_string()
-            } else {
-                state.pending_voice_emotion.clone()
-            };
-            let summary = if state.pending_summary_preview.is_empty() {
-                "n/a".to_string()
-            } else {
-                truncate_for_overlay(&state.pending_summary_preview, 180)
-            };
-            let prompt = if state.pending_prompt_preview.is_empty() {
-                "n/a".to_string()
-            } else {
-                truncate_for_overlay(&state.pending_prompt_preview, 220)
-            };
-            let api_status = if state.api_status.is_empty() {
-                "n/a".to_string()
-            } else {
-                truncate_for_overlay(&state.api_status, 120)
-            };
-            let audio_path = if state.last_audio_path.is_empty() {
-                "n/a".to_string()
-            } else {
-                truncate_for_overlay(&state.last_audio_path, 120)
-            };
-            (
-                state.queue.len(),
-                line,
-                pending_speaker,
-                chat_emotion,
-                voice_emotion,
-                summary,
-                prompt,
-                api_status,
-                audio_path,
-            )
-        }
-        None => (
-            0,
-            "n/a".to_string(),
-            "n/a".to_string(),
-            "n/a".to_string(),
-            "n/a".to_string(),
-            "n/a".to_string(),
-            "n/a".to_string(),
-            "n/a".to_string(),
-            "n/a".to_string(),
+        score,
+        kill_count,
+        coin_pickup_count,
+        health_pickup_count,
+        total_airtime_s,
+        total_wheelie_s,
+        big_jump_count,
+        huge_jump_count,
+    ) = match run_summary {
+        Some(summary) => (
+            summary.score,
+            summary.kill_count,
+            summary.coin_pickup_count,
+            summary.health_pickup_count,
+            summary.total_airtime_s,
+            summary.total_wheelie_s,
+            summary.big_jump_count,
+            summary.huge_jump_count,
         ),
+        None => (0, 0, 0, 0, 0.0, 0.0, 0, 0),
     };
 
     let (airtime_cur, airtime_best, wheelie_best, flip_count, crash_count, max_speed, last_impact) =
@@ -413,38 +444,31 @@ fn update_debug_overlay_text(
         };
 
     *text = Text::new(format!(
-        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2})\nWheelie Best: {wheelie_best:>4.2}s | Flips: {flips} | Crashes: {crashes}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nCommentary Queue: {queue_len}\nCommentary Pending Speaker: {pending_speaker}\nCommentary Pending Emotions: chat={pending_chat_emotion} voice={pending_voice_emotion}\nCommentary Next Summary: {next_summary}\nCommentary Prompt Preview: {prompt_preview}\nCommentary API: {commentary_api_status}\nCommentary Audio File: {commentary_audio_path}\nLast Commentary: {last_line}\nHotkeys: H help | V vehicle tune | F5 reload config | J big jump | K kill | C crash",
+        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nScore: {score} | Kills: {kills} | Coins: {coins} | Health Crates: {health_pickups}\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2}) | Total: {air_total:>5.2}s\nWheelie Best: {wheelie_best:>4.2}s | Total: {wheelie_total:>5.2}s\nFlips: {flips} | Crashes: {crashes} | Big/Huge Jumps: {big_jumps}/{huge_jumps}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nCamera Pan Offset: {camera_pan_offset:>6.1} m\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nHotkeys: H help | V vehicle tune | B background tune | O/P pan camera | F5 reload config | J big jump | K kill | C crash",
         distance = run_stats.distance_m,
         player_x = player_x,
         speed = run_stats.speed_mps,
+        score = score,
+        kills = kill_count,
+        coins = coin_pickup_count,
+        health_pickups = health_pickup_count,
         accel = if input_accel { "yes" } else { "no" },
         brake = if input_brake { "yes" } else { "no" },
         grounded = if run_stats.grounded { "yes" } else { "no" },
         air_cur = airtime_cur,
         air_best = airtime_best,
+        air_total = total_airtime_s,
         wheelie_best = wheelie_best,
+        wheelie_total = total_wheelie_s,
         flips = flip_count,
         crashes = crash_count,
+        big_jumps = big_jump_count,
+        huge_jumps = huge_jump_count,
         max_speed = max_speed,
         impact = last_impact,
+        camera_pan_offset = camera_pan.offset_x_m,
         segment = run_stats.active_segment_id,
-        pending_speaker = pending_speaker,
-        pending_chat_emotion = pending_chat_emotion,
-        pending_voice_emotion = pending_voice_emotion,
-        next_summary = next_summary,
-        prompt_preview = prompt_preview,
-        commentary_api_status = commentary_api_status,
-        commentary_audio_path = commentary_audio_path,
     ));
-}
-
-fn truncate_for_overlay(value: &str, max_chars: usize) -> String {
-    let cleaned = value.replace('\n', " ");
-    if cleaned.chars().count() <= max_chars {
-        return cleaned;
-    }
-    let truncated: String = cleaned.chars().take(max_chars.saturating_sub(1)).collect();
-    format!("{truncated}...")
 }
 
 fn toggle_keybind_overlay(
@@ -509,6 +533,31 @@ fn toggle_vehicle_tuning_panel(
         info!("Vehicle tuning panel shown.");
     } else {
         info!("Vehicle tuning panel hidden.");
+    }
+}
+
+fn toggle_background_tuning_panel(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut panel_state: ResMut<BackgroundTuningPanelState>,
+    config: Option<Res<GameConfig>>,
+    run_stats: Res<DebugRunStats>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyB) {
+        return;
+    }
+
+    panel_state.visible = !panel_state.visible;
+    if panel_state.visible {
+        if let Some(config) = config {
+            if let Err(error) =
+                sync_background_panel_state_from_config(&mut panel_state, &config, &run_stats)
+            {
+                panel_state.status = error;
+            }
+        }
+        info!("Background tuning panel shown.");
+    } else {
+        info!("Background tuning panel hidden.");
     }
 }
 
@@ -836,6 +885,148 @@ fn vehicle_tuning_panel_ui(
     }
 }
 
+fn background_tuning_panel_ui(
+    mut egui_contexts: EguiContexts,
+    mut panel_state: ResMut<BackgroundTuningPanelState>,
+    mut config: ResMut<GameConfig>,
+    run_stats: Res<DebugRunStats>,
+) {
+    if !panel_state.visible {
+        return;
+    }
+
+    let active_background_id = match preferred_background_id(&config, &run_stats) {
+        Some(id) => id,
+        None => {
+            panel_state.status =
+                "Background tuning panel: no background id available from config.".to_string();
+            return;
+        }
+    };
+
+    if panel_state.params.is_none() || panel_state.source_background_id != active_background_id {
+        if let Err(error) =
+            sync_background_panel_state_from_config(&mut panel_state, &config, &run_stats)
+        {
+            panel_state.status = error;
+            return;
+        }
+    }
+
+    let Some(mut params) = panel_state.params.clone() else {
+        return;
+    };
+
+    let mut window_open = panel_state.visible;
+    let mut params_changed = false;
+    let mut reload_clicked = false;
+    let mut apply_clicked = false;
+    let status = panel_state.status.clone();
+    let background_id = panel_state.source_background_id.clone();
+
+    let Ok(ctx) = egui_contexts.ctx_mut() else {
+        return;
+    };
+    egui::Window::new("Background Splat Tuning")
+        .open(&mut window_open)
+        .resizable(true)
+        .default_width(580.0)
+        .show(ctx, |ui| {
+            ui.label(format!("Active background: {background_id}"));
+            ui.label("Each row has a slider plus a free-form float value.");
+            ui.label("Scale values are non-zero; negative scale flips that axis.");
+            ui.separator();
+
+            params_changed |=
+                tuning_slider_row(ui, "parallax", &mut params.parallax, -2.0..=2.0, 0.01);
+            params_changed |= tuning_slider_row(
+                ui,
+                "offset_x_m",
+                &mut params.offset_x_m,
+                -2000.0..=2000.0,
+                0.05,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "offset_y_m",
+                &mut params.offset_y_m,
+                -1000.0..=1000.0,
+                0.05,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "offset_z_m",
+                &mut params.offset_z_m,
+                -1000.0..=1000.0,
+                0.05,
+            );
+            params_changed |=
+                tuning_slider_row(ui, "scale_x", &mut params.scale_x, -50.0..=50.0, 0.01);
+            params_changed |=
+                tuning_slider_row(ui, "scale_y", &mut params.scale_y, -50.0..=50.0, 0.01);
+            params_changed |=
+                tuning_slider_row(ui, "scale_z", &mut params.scale_z, -50.0..=50.0, 0.01);
+            params_changed |= tuning_slider_row(
+                ui,
+                "loop_length_m (0 = disabled)",
+                &mut params.loop_length_m,
+                0.0..=5000.0,
+                0.1,
+            );
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("Reload From Config").clicked() {
+                    reload_clicked = true;
+                }
+                if ui.button("Apply To backgrounds.toml").clicked() {
+                    apply_clicked = true;
+                }
+            });
+
+            if !status.is_empty() {
+                ui.separator();
+                ui.label(status);
+            }
+        });
+
+    panel_state.visible = window_open;
+
+    if reload_clicked {
+        match sync_background_panel_state_from_config(&mut panel_state, &config, &run_stats) {
+            Ok(()) => panel_state.status = "Reloaded values from current config.".to_string(),
+            Err(error) => panel_state.status = error,
+        }
+        return;
+    }
+
+    panel_state.params = Some(params.clone());
+
+    if params_changed {
+        if let Err(error) =
+            apply_background_tuning_to_runtime_config(&mut config, &background_id, &params)
+        {
+            panel_state.status = error;
+        } else {
+            panel_state.status = "Live-tuning active (in-memory config updated).".to_string();
+        }
+    }
+
+    if apply_clicked {
+        match persist_background_tuning_and_reload(&mut config, &background_id, &params) {
+            Ok(message) => {
+                panel_state.status = message;
+                if let Err(error) =
+                    sync_background_panel_state_from_config(&mut panel_state, &config, &run_stats)
+                {
+                    panel_state.status = error;
+                }
+            }
+            Err(error) => panel_state.status = error,
+        }
+    }
+}
+
 fn tuning_slider_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -872,6 +1063,47 @@ fn sync_panel_state_from_config(
     Ok(())
 }
 
+fn preferred_background_id(config: &GameConfig, run_stats: &DebugRunStats) -> Option<String> {
+    if config
+        .backgrounds_by_id
+        .contains_key(run_stats.active_segment_id.as_str())
+    {
+        return Some(run_stats.active_segment_id.clone());
+    }
+
+    config
+        .segments
+        .segment_sequence
+        .first()
+        .map(|segment| segment.id.clone())
+        .or_else(|| {
+            config
+                .backgrounds
+                .backgrounds
+                .first()
+                .map(|background| background.id.clone())
+        })
+}
+
+fn sync_background_panel_state_from_config(
+    panel_state: &mut BackgroundTuningPanelState,
+    config: &GameConfig,
+    run_stats: &DebugRunStats,
+) -> Result<(), String> {
+    let Some(background_id) = preferred_background_id(config, run_stats) else {
+        return Err("Background tuning panel: no background id available from config.".to_string());
+    };
+    let Some(background) = config.backgrounds_by_id.get(&background_id) else {
+        return Err(format!(
+            "Background tuning panel: background `{background_id}` not found in config."
+        ));
+    };
+
+    panel_state.source_background_id = background_id;
+    panel_state.params = Some(BackgroundTuningParams::from_background(background));
+    Ok(())
+}
+
 fn apply_vehicle_tuning_to_runtime_config(
     config: &mut GameConfig,
     vehicle_id: &str,
@@ -898,6 +1130,32 @@ fn apply_vehicle_tuning_to_runtime_config(
     Ok(())
 }
 
+fn apply_background_tuning_to_runtime_config(
+    config: &mut GameConfig,
+    background_id: &str,
+    params: &BackgroundTuningParams,
+) -> Result<(), String> {
+    let Some(background) = config.backgrounds_by_id.get_mut(background_id) else {
+        return Err(format!(
+            "Background tuning panel: runtime background `{background_id}` not found in backgrounds_by_id."
+        ));
+    };
+    params.apply_to_background(background);
+
+    let Some(background) = config
+        .backgrounds
+        .backgrounds
+        .iter_mut()
+        .find(|background| background.id == background_id)
+    else {
+        return Err(format!(
+            "Background tuning panel: runtime background `{background_id}` not found in backgrounds list."
+        ));
+    };
+    params.apply_to_background(background);
+    Ok(())
+}
+
 fn persist_vehicle_tuning_and_reload(
     config: &mut GameConfig,
     vehicle_id: &str,
@@ -913,6 +1171,45 @@ fn persist_vehicle_tuning_and_reload(
 
     let updated_raw = toml::to_string_pretty(&root)
         .map_err(|error| format!("Failed serializing vehicles TOML: {error}"))?;
+    fs::write(&path, updated_raw)
+        .map_err(|error| format!("Failed writing `{}`: {error}", path.display()))?;
+
+    match GameConfig::load_from_dir(Path::new("config")) {
+        Ok(new_config) => {
+            *config = new_config;
+            Ok(format!(
+                "Applied tuning and saved to {}.",
+                path.to_string_lossy()
+            ))
+        }
+        Err(error) => {
+            let _ = fs::write(&path, original_raw);
+            if let Ok(restored) = GameConfig::load_from_dir(Path::new("config")) {
+                *config = restored;
+            }
+            Err(format!(
+                "Apply failed validation: {error}. Reverted `{}`.",
+                path.display()
+            ))
+        }
+    }
+}
+
+fn persist_background_tuning_and_reload(
+    config: &mut GameConfig,
+    background_id: &str,
+    params: &BackgroundTuningParams,
+) -> Result<String, String> {
+    let path = Path::new("config").join("backgrounds.toml");
+    let original_raw = fs::read_to_string(&path)
+        .map_err(|error| format!("Failed reading `{}`: {error}", path.display()))?;
+    let mut root: toml::Value = toml::from_str(&original_raw)
+        .map_err(|error| format!("Failed parsing `{}`: {error}", path.display()))?;
+
+    write_background_params_to_toml_value(&mut root, background_id, params)?;
+
+    let updated_raw = toml::to_string_pretty(&root)
+        .map_err(|error| format!("Failed serializing backgrounds TOML: {error}"))?;
     fs::write(&path, updated_raw)
         .map_err(|error| format!("Failed writing `{}`: {error}", path.display()))?;
 
@@ -1070,6 +1367,43 @@ fn write_params_to_toml_value(
     Ok(())
 }
 
+fn write_background_params_to_toml_value(
+    root: &mut toml::Value,
+    background_id: &str,
+    params: &BackgroundTuningParams,
+) -> Result<(), String> {
+    let Some(backgrounds_array) = root
+        .get_mut("backgrounds")
+        .and_then(toml::Value::as_array_mut)
+    else {
+        return Err("backgrounds.toml: missing or invalid `backgrounds` array".to_string());
+    };
+
+    let Some(background_table) = backgrounds_array.iter_mut().find_map(|background_value| {
+        let table = background_value.as_table_mut()?;
+        if table.get("id").and_then(toml::Value::as_str) == Some(background_id) {
+            Some(table)
+        } else {
+            None
+        }
+    }) else {
+        return Err(format!(
+            "backgrounds.toml: could not find background with id `{background_id}`"
+        ));
+    };
+
+    set_toml_float(background_table, "parallax", params.parallax)?;
+    set_toml_float(background_table, "offset_x_m", params.offset_x_m)?;
+    set_toml_float(background_table, "offset_y_m", params.offset_y_m)?;
+    set_toml_float(background_table, "offset_z_m", params.offset_z_m)?;
+    set_toml_float(background_table, "scale_x", params.scale_x)?;
+    set_toml_float(background_table, "scale_y", params.scale_y)?;
+    set_toml_float(background_table, "scale_z", params.scale_z)?;
+    set_toml_float(background_table, "loop_length_m", params.loop_length_m)?;
+
+    Ok(())
+}
+
 fn set_toml_float(
     table: &mut toml::map::Map<String, toml::Value>,
     key: &str,
@@ -1087,6 +1421,8 @@ fn keybind_overlay_text() -> &'static str {
     "Keybinds\n\
 H - Toggle this panel\n\
 V - Toggle vehicle tuning panel\n\
+B - Toggle background tuning panel\n\
+O / P - Pan camera left / right\n\
 A/D or Left/Right - Choose upgrade option (when shown)\n\
 F5 - Hot-reload config\n\
 D / Right - Accelerate\n\
