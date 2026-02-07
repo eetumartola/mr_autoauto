@@ -184,7 +184,7 @@ fn cleanup_combat_entities(
     >,
 ) {
     for entity in &cleanup_query {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 }
 
@@ -509,14 +509,14 @@ fn simulate_player_projectiles(
                 spawn_explosion_fx(&mut commands, impact_position);
             }
             projectile.remaining_lifetime_s = -1.0;
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             continue;
         }
 
         projectile.remaining_lifetime_s -= dt;
 
         if projectile.remaining_lifetime_s <= 0.0 {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -595,7 +595,7 @@ fn resolve_player_projectile_enemy_hits(
     }
 
     for projectile_entity in consumed_projectiles {
-        commands.entity(projectile_entity).despawn();
+        commands.entity(projectile_entity).try_despawn();
     }
 
     for enemy_entity in flashed_enemies {
@@ -614,7 +614,7 @@ fn resolve_player_projectile_enemy_hits(
 
     for (enemy_entity, enemy_type_id) in dead_enemies {
         killed_message_writer.write(EnemyKilledEvent { enemy_type_id });
-        commands.entity(enemy_entity).despawn();
+        commands.entity(enemy_entity).try_despawn();
     }
 }
 
@@ -632,7 +632,7 @@ fn update_fade_out_fx(
         sprite.color = color;
 
         if fx.remaining_s <= 0.0 {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }

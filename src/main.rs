@@ -8,6 +8,8 @@ mod states;
 use assets::AssetRegistryPlugin;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
+use bevy_egui::EguiPlugin;
+use bevy_rapier2d::prelude::*;
 use commentary_stub::CommentaryStubPlugin;
 use config::ConfigPlugin;
 use debug::DebugOverlayPlugin;
@@ -24,6 +26,8 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(EguiPlugin::default())
+        .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(1.0))
         .add_plugins(FrameTimeDiagnosticsPlugin::default())
         .add_plugins(ConfigPlugin)
         .add_plugins(AssetRegistryPlugin)

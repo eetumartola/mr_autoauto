@@ -1,9 +1,9 @@
 use crate::config::{EnemyTypeConfig, GameConfig, WeaponConfig};
-use crate::debug::EnemyDebugMarker;
+use crate::debug::{DebugGameplayGuards, EnemyDebugMarker};
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
 use bevy::prelude::*;
-use std::collections::HashMap;
+use bevy_rapier2d::prelude::*;
 use std::f32::consts::TAU;
 
 const ENEMY_SPAWN_START_AHEAD_M: f32 = 32.0;
@@ -35,12 +35,6 @@ const PLAYER_CONTACT_HIT_RADIUS_M: f32 = 1.45;
 const PLAYER_PROJECTILE_HIT_RADIUS_M: f32 = 1.25;
 const MIN_ENEMY_FIRE_RATE_HZ: f32 = 0.05;
 const MIN_ENEMY_FIRE_COOLDOWN_S: f32 = 0.12;
-const ENEMY_EXTERNAL_VELOCITY_DAMPING: f32 = 3.8;
-const PLAYER_COLLISION_RADIUS_M: f32 = 1.4;
-const PLAYER_COLLISION_MASS: f32 = 5.0;
-const ENEMY_COLLISION_IMPULSE_GAIN: f32 = 4.4;
-const ENEMY_PLAYER_COLLISION_IMPULSE_GAIN: f32 = 5.2;
-const ENEMY_COLLISION_SEPARATION_BIAS_M: f32 = 0.02;
 const ENEMY_MASS_PER_RADIUS_SQUARED: f32 = 18.0;
 const ENEMY_MIN_MASS: f32 = 2.4;
 
@@ -56,7 +50,6 @@ impl Plugin for EnemyGameplayPlugin {
                 (
                     spawn_bootstrap_enemies,
                     update_enemy_behaviors,
-                    resolve_enemy_body_collisions,
                     fire_enemy_projectiles,
                     simulate_enemy_projectiles,
                     resolve_enemy_projectile_hits_player,
@@ -126,12 +119,6 @@ struct EnemyBehavior {
 }
 
 #[derive(Component, Debug, Clone, Copy)]
-struct EnemyDynamics {
-    external_velocity_mps: Vec2,
-    mass_kg: f32,
-}
-
-#[derive(Component, Debug, Clone, Copy)]
 struct EnemyAttackState {
     cooldown_s: f32,
     rng_state: u64,
@@ -188,7 +175,7 @@ fn cleanup_enemy_run_entities(
     >,
 ) {
     for entity in &cleanup_query {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 }
 
@@ -261,6 +248,11 @@ fn spawn_enemy_instance(
         EnemyBehaviorKind::Bomber => base_altitude,
         _ => ground_y,
     };
+    let enemy_mass = enemy_mass_from_hitbox(enemy_cfg.hitbox_radius);
+    let gravity_scale = match behavior_kind {
+        EnemyBehaviorKind::Flier | EnemyBehaviorKind::Bomber => 0.0,
+        _ => 1.0,
+    };
 
     let enemy_entity = commands
         .spawn((
@@ -279,10 +271,6 @@ fn spawn_enemy_instance(
             EnemyMotion {
                 base_speed_mps: enemy_cfg.speed,
             },
-            EnemyDynamics {
-                external_velocity_mps: Vec2::ZERO,
-                mass_kg: enemy_mass_from_hitbox(enemy_cfg.hitbox_radius),
-            },
             EnemyBehavior {
                 kind: behavior_kind,
                 base_altitude_m: base_altitude,
@@ -298,6 +286,22 @@ fn spawn_enemy_instance(
             },
             Sprite::from_color(body_color, body_size),
             Transform::from_xyz(spawn_x, start_y, 8.0),
+        ))
+        .insert((
+            RigidBody::Dynamic,
+            Collider::ball(enemy_cfg.hitbox_radius.max(0.08)),
+            ColliderMassProperties::Mass(enemy_mass),
+            Friction::coefficient(1.10),
+            Restitution::coefficient(0.02),
+            GravityScale(gravity_scale),
+            Damping {
+                linear_damping: 2.4,
+                angular_damping: 3.2,
+            },
+            Velocity::zero(),
+            LockedAxes::ROTATION_LOCKED,
+            Ccd::enabled(),
+            Sleeping::disabled(),
         ))
         .id();
 
@@ -338,9 +342,9 @@ fn update_enemy_behaviors(
     player_query: Query<&Transform, (With<PlayerVehicle>, Without<Enemy>)>,
     mut enemy_query: Query<
         (
-            &mut Transform,
+            &Transform,
+            &mut Velocity,
             &mut EnemyBehavior,
-            &mut EnemyDynamics,
             &EnemyMotion,
             &EnemyHitbox,
             &EnemyTypeId,
@@ -354,209 +358,56 @@ fn update_enemy_behaviors(
     let player_x = player_transform.translation.x;
     let dt = time.delta_secs();
 
-    for (mut transform, mut behavior, mut dynamics, motion, hitbox, enemy_type_id) in
-        &mut enemy_query
-    {
+    for (transform, mut velocity, mut behavior, motion, hitbox, enemy_type_id) in &mut enemy_query {
+        let enemy_position = transform.translation.truncate();
         let ground_offset = hitbox.radius_m.max(0.15);
         behavior.elapsed_s += dt;
+        let mut desired_velocity = velocity.linvel;
 
         match behavior.kind {
             EnemyBehaviorKind::Walker => {
-                transform.translation.x -= motion.base_speed_mps * dt;
-                let ground_y =
-                    terrain_height_at_x(&config, transform.translation.x) + ground_offset;
-                transform.translation.y = transform
-                    .translation
-                    .y
-                    .lerp(ground_y, (GROUND_FOLLOW_SNAP_RATE * dt).clamp(0.0, 1.0));
+                desired_velocity.x = -motion.base_speed_mps;
+                let ground_y = terrain_height_at_x(&config, enemy_position.x) + ground_offset;
+                desired_velocity.y = (ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE;
             }
             EnemyBehaviorKind::Flier => {
-                transform.translation.x -= motion.base_speed_mps * 0.82 * dt;
+                desired_velocity.x = -(motion.base_speed_mps * 0.82);
                 let hover = (behavior.elapsed_s * behavior.hover_frequency_hz * TAU
                     + behavior.phase_offset_rad)
                     .sin()
                     * behavior.hover_amplitude_m;
                 let target_y = behavior.base_altitude_m + hover;
-                transform.translation.y = transform
-                    .translation
-                    .y
-                    .lerp(target_y, (7.0 * dt).clamp(0.0, 1.0));
+                desired_velocity.y = (target_y - enemy_position.y) * 7.0;
             }
             EnemyBehaviorKind::Turret => {
-                transform.translation.x -= motion.base_speed_mps * 0.06 * dt;
-                let ground_y =
-                    terrain_height_at_x(&config, transform.translation.x) + ground_offset;
-                transform.translation.y = transform
-                    .translation
-                    .y
-                    .lerp(ground_y, (GROUND_FOLLOW_SNAP_RATE * dt).clamp(0.0, 1.0));
+                desired_velocity.x = -(motion.base_speed_mps * 0.06);
+                let ground_y = terrain_height_at_x(&config, enemy_position.x) + ground_offset;
+                desired_velocity.y = (ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE;
             }
             EnemyBehaviorKind::Charger => {
-                let distance_to_player = transform.translation.x - player_x;
+                let distance_to_player = enemy_position.x - player_x;
                 let charge_multiplier = if distance_to_player <= 20.0 {
                     behavior.charge_speed_multiplier
                 } else {
                     0.55
                 };
-                transform.translation.x -= motion.base_speed_mps * charge_multiplier * dt;
-                let ground_y =
-                    terrain_height_at_x(&config, transform.translation.x) + ground_offset;
-                transform.translation.y = transform
-                    .translation
-                    .y
-                    .lerp(ground_y, (GROUND_FOLLOW_SNAP_RATE * dt).clamp(0.0, 1.0));
+                desired_velocity.x = -(motion.base_speed_mps * charge_multiplier);
+                let ground_y = terrain_height_at_x(&config, enemy_position.x) + ground_offset;
+                desired_velocity.y = (ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE;
             }
             EnemyBehaviorKind::Bomber => {
-                transform.translation.x -= motion.base_speed_mps * 0.95 * dt;
-                transform.translation.y = transform
-                    .translation
-                    .y
-                    .lerp(behavior.base_altitude_m, (4.0 * dt).clamp(0.0, 1.0));
+                desired_velocity.x = -(motion.base_speed_mps * 0.95);
+                desired_velocity.y = (behavior.base_altitude_m - enemy_position.y) * 4.0;
             }
         }
 
-        transform.translation += (dynamics.external_velocity_mps * dt).extend(0.0);
-        dynamics.external_velocity_mps *= f32::exp(-ENEMY_EXTERNAL_VELOCITY_DAMPING * dt);
+        let smooth = (8.5 * dt).clamp(0.0, 1.0);
+        velocity.linvel = velocity.linvel.lerp(desired_velocity, smooth);
+        velocity.linvel.y = velocity.linvel.y.clamp(-40.0, 40.0);
+        velocity.linvel.x = velocity.linvel.x.clamp(-90.0, 90.0);
 
         if enemy_type_id.0.is_empty() {
             warn!("Encountered enemy with empty type id.");
-        }
-    }
-}
-
-#[allow(clippy::type_complexity)]
-fn resolve_enemy_body_collisions(
-    mut player_query: Query<&mut Transform, (With<PlayerVehicle>, Without<Enemy>)>,
-    mut enemy_queries: ParamSet<(
-        Query<(Entity, &Transform, &EnemyHitbox, &EnemyDynamics), With<Enemy>>,
-        Query<(Entity, &mut Transform, &mut EnemyDynamics), With<Enemy>>,
-    )>,
-) {
-    #[derive(Debug, Clone, Copy)]
-    struct EnemyBodySnapshot {
-        entity: Entity,
-        position: Vec2,
-        radius_m: f32,
-        mass_kg: f32,
-    }
-
-    let Ok(mut player_transform) = player_query.single_mut() else {
-        return;
-    };
-    let player_position = player_transform.translation.truncate();
-
-    let snapshots: Vec<EnemyBodySnapshot> = enemy_queries
-        .p0()
-        .iter()
-        .map(|(entity, transform, hitbox, dynamics)| EnemyBodySnapshot {
-            entity,
-            position: transform.translation.truncate(),
-            radius_m: hitbox.radius_m.max(0.05),
-            mass_kg: dynamics.mass_kg.max(ENEMY_MIN_MASS),
-        })
-        .collect();
-
-    if snapshots.is_empty() {
-        return;
-    }
-
-    let mut player_position_offset = Vec2::ZERO;
-    let mut enemy_position_offsets: HashMap<Entity, Vec2> = HashMap::new();
-    let mut enemy_velocity_impulses: HashMap<Entity, Vec2> = HashMap::new();
-
-    for enemy in &snapshots {
-        let to_enemy = enemy.position - player_position;
-        let distance = to_enemy.length();
-        let combined_radius = PLAYER_COLLISION_RADIUS_M + enemy.radius_m;
-        if distance >= combined_radius {
-            continue;
-        }
-
-        let normal = if distance > 0.0001 {
-            to_enemy / distance
-        } else {
-            Vec2::X
-        };
-        let penetration = (combined_radius - distance + ENEMY_COLLISION_SEPARATION_BIAS_M).max(0.0);
-        if penetration <= 0.0 {
-            continue;
-        }
-
-        let inv_player_mass = 1.0 / PLAYER_COLLISION_MASS.max(0.01);
-        let inv_enemy_mass = 1.0 / enemy.mass_kg.max(0.01);
-        let inv_total = inv_player_mass + inv_enemy_mass;
-        if inv_total <= f32::EPSILON {
-            continue;
-        }
-
-        let player_share = inv_player_mass / inv_total;
-        let enemy_share = inv_enemy_mass / inv_total;
-        let correction = normal * penetration;
-
-        player_position_offset -= correction * player_share;
-        *enemy_position_offsets
-            .entry(enemy.entity)
-            .or_insert(Vec2::ZERO) += correction * enemy_share;
-        *enemy_velocity_impulses
-            .entry(enemy.entity)
-            .or_insert(Vec2::ZERO) += normal * (penetration * ENEMY_PLAYER_COLLISION_IMPULSE_GAIN);
-    }
-
-    for i in 0..snapshots.len() {
-        for j in (i + 1)..snapshots.len() {
-            let a = snapshots[i];
-            let b = snapshots[j];
-            let delta = b.position - a.position;
-            let distance = delta.length();
-            let combined_radius = a.radius_m + b.radius_m;
-            if distance >= combined_radius {
-                continue;
-            }
-
-            let normal = if distance > 0.0001 {
-                delta / distance
-            } else {
-                Vec2::X
-            };
-            let penetration =
-                (combined_radius - distance + ENEMY_COLLISION_SEPARATION_BIAS_M).max(0.0);
-            if penetration <= 0.0 {
-                continue;
-            }
-
-            let inv_mass_a = 1.0 / a.mass_kg.max(0.01);
-            let inv_mass_b = 1.0 / b.mass_kg.max(0.01);
-            let inv_total = inv_mass_a + inv_mass_b;
-            if inv_total <= f32::EPSILON {
-                continue;
-            }
-
-            let a_share = inv_mass_a / inv_total;
-            let b_share = inv_mass_b / inv_total;
-            let correction = normal * penetration;
-
-            *enemy_position_offsets.entry(a.entity).or_insert(Vec2::ZERO) -= correction * a_share;
-            *enemy_position_offsets.entry(b.entity).or_insert(Vec2::ZERO) += correction * b_share;
-
-            let impulse = normal * (penetration * ENEMY_COLLISION_IMPULSE_GAIN);
-            *enemy_velocity_impulses
-                .entry(a.entity)
-                .or_insert(Vec2::ZERO) -= impulse * a_share;
-            *enemy_velocity_impulses
-                .entry(b.entity)
-                .or_insert(Vec2::ZERO) += impulse * b_share;
-        }
-    }
-
-    player_transform.translation += player_position_offset.extend(0.0);
-
-    for (entity, mut transform, mut dynamics) in &mut enemy_queries.p1() {
-        if let Some(offset) = enemy_position_offsets.get(&entity) {
-            transform.translation += offset.extend(0.0);
-        }
-        if let Some(impulse) = enemy_velocity_impulses.get(&entity) {
-            let mass = dynamics.mass_kg.max(0.01);
-            dynamics.external_velocity_mps += *impulse / mass;
         }
     }
 }
@@ -704,19 +555,20 @@ fn simulate_enemy_projectiles(
 
         let ground_y = terrain_height_at_x(&config, transform.translation.x);
         if transform.translation.y <= ground_y {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             continue;
         }
 
         projectile.remaining_lifetime_s -= dt;
         if projectile.remaining_lifetime_s <= 0.0 {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }
 
 fn resolve_enemy_projectile_hits_player(
     mut commands: Commands,
+    debug_guards: Option<Res<DebugGameplayGuards>>,
     projectile_query: Query<(Entity, &Transform, &EnemyProjectile)>,
     mut player_query: Query<(&Transform, &mut PlayerHealth), With<PlayerVehicle>>,
 ) {
@@ -738,18 +590,22 @@ fn resolve_enemy_projectile_hits_player(
         }
     }
 
-    if total_damage > 0.0 {
+    let player_invulnerable = debug_guards
+        .as_ref()
+        .is_some_and(|guards| guards.player_invulnerable);
+    if total_damage > 0.0 && !player_invulnerable {
         player_health.current = (player_health.current - total_damage).max(0.0);
     }
 
     for projectile_entity in consumed_projectiles {
-        commands.entity(projectile_entity).despawn();
+        commands.entity(projectile_entity).try_despawn();
     }
 }
 
 fn apply_enemy_contact_damage_to_player(
     time: Res<Time>,
     config: Res<GameConfig>,
+    debug_guards: Option<Res<DebugGameplayGuards>>,
     mut player_query: Query<(&Transform, &mut PlayerHealth), With<PlayerVehicle>>,
     enemy_query: Query<(&Transform, &EnemyHitbox, &EnemyTypeId), With<Enemy>>,
 ) {
@@ -775,7 +631,10 @@ fn apply_enemy_contact_damage_to_player(
         }
     }
 
-    if total_contact_damage > 0.0 {
+    let player_invulnerable = debug_guards
+        .as_ref()
+        .is_some_and(|guards| guards.player_invulnerable);
+    if total_contact_damage > 0.0 && !player_invulnerable {
         player_health.current = (player_health.current - total_contact_damage).max(0.0);
     }
 }
@@ -793,7 +652,7 @@ fn despawn_far_enemies(
 
     for (entity, transform) in &enemy_query {
         if transform.translation.x < min_x || transform.translation.x > max_x {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }

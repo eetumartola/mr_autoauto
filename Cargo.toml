@@ -9,6 +9,8 @@ gaussian_splats = ["dep:bevy_gaussian_splatting"]
 
 [dependencies]
 bevy = { version = "0.17", default-features = true, features = ["jpeg"] }
+bevy_egui = "0.38.1"
+bevy_rapier2d = "0.32"
 bevy_gaussian_splatting = { version = "6.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"

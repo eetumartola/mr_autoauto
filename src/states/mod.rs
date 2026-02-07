@@ -110,7 +110,7 @@ fn cleanup_loading_screen(
     loading_logo_query: Query<Entity, With<LoadingScreenLogo>>,
 ) {
     for entity in &loading_logo_query {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
     commands.remove_resource::<LoadingScreenState>();
 }
@@ -296,7 +296,7 @@ fn cleanup_results_screen(
     results_screen_query: Query<Entity, With<ResultsScreenRoot>>,
 ) {
     for entity in &results_screen_query {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
     }
 }
 

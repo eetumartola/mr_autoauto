@@ -335,6 +335,11 @@ impl GameConfig {
                     "vehicles.toml::vehicles[{index}].max_fall_speed must be > 0"
                 )));
             }
+            if vehicle.air_max_rotation_speed <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].air_max_rotation_speed must be > 0"
+                )));
+            }
             if vehicle.linear_speed_scale <= 0.0 {
                 return Err(ConfigError::Validation(format!(
                     "vehicles.toml::vehicles[{index}].linear_speed_scale must be > 0"
@@ -403,6 +408,11 @@ impl GameConfig {
             if !(0.0..=1.0).contains(&vehicle.tire_slip_grip_floor) {
                 return Err(ConfigError::Validation(format!(
                     "vehicles.toml::vehicles[{index}].tire_slip_grip_floor must be in [0, 1]"
+                )));
+            }
+            if !(0.0..=1.0).contains(&vehicle.front_drive_ratio) {
+                return Err(ConfigError::Validation(format!(
+                    "vehicles.toml::vehicles[{index}].front_drive_ratio must be in [0, 1]"
                 )));
             }
             if vehicle.rear_drive_traction_assist_distance_m < 0.0 {
@@ -767,6 +777,8 @@ pub struct VehicleConfig {
     pub acceleration: f32,
     pub brake_strength: f32,
     pub air_pitch_torque: f32,
+    #[serde(default = "default_air_max_rotation_speed")]
+    pub air_max_rotation_speed: f32,
     pub max_forward_speed: f32,
     pub max_reverse_speed: f32,
     pub max_fall_speed: f32,
@@ -791,6 +803,8 @@ pub struct VehicleConfig {
     pub tire_longitudinal_grip: f32,
     #[serde(default = "default_tire_slip_grip_floor")]
     pub tire_slip_grip_floor: f32,
+    #[serde(default = "default_front_drive_ratio")]
+    pub front_drive_ratio: f32,
     #[serde(default = "default_rear_drive_traction_assist_distance_m")]
     pub rear_drive_traction_assist_distance_m: f32,
     #[serde(default = "default_rear_drive_traction_assist_min_factor")]
@@ -813,6 +827,10 @@ pub struct VehicleConfig {
 
 fn default_turret_range_m() -> f32 {
     28.0
+}
+
+fn default_air_max_rotation_speed() -> f32 {
+    5.5
 }
 
 fn default_suspension_rest_length_m() -> f32 {
@@ -841,6 +859,10 @@ fn default_tire_longitudinal_grip() -> f32 {
 
 fn default_tire_slip_grip_floor() -> f32 {
     0.45
+}
+
+fn default_front_drive_ratio() -> f32 {
+    0.30
 }
 
 fn default_rear_drive_traction_assist_distance_m() -> f32 {
@@ -1103,6 +1125,7 @@ mod tests {
                     acceleration: 10.0,
                     brake_strength: 5.0,
                     air_pitch_torque: 2.0,
+                    air_max_rotation_speed: 5.5,
                     max_forward_speed: 300.0,
                     max_reverse_speed: 160.0,
                     max_fall_speed: 240.0,
@@ -1120,6 +1143,7 @@ mod tests {
                     suspension_max_extension_m: 0.28,
                     tire_longitudinal_grip: 1.0,
                     tire_slip_grip_floor: 0.45,
+                    front_drive_ratio: 0.30,
                     rear_drive_traction_assist_distance_m: 0.20,
                     rear_drive_traction_assist_min_factor: 0.55,
                     turret_range_m: 28.0,
@@ -1256,6 +1280,7 @@ mod tests {
                     acceleration: 10.0,
                     brake_strength: 5.0,
                     air_pitch_torque: 2.0,
+                    air_max_rotation_speed: 5.5,
                     max_forward_speed: 300.0,
                     max_reverse_speed: 160.0,
                     max_fall_speed: 240.0,
@@ -1273,6 +1298,7 @@ mod tests {
                     suspension_max_extension_m: 0.28,
                     tire_longitudinal_grip: 1.0,
                     tire_slip_grip_floor: 0.45,
+                    front_drive_ratio: 0.30,
                     rear_drive_traction_assist_distance_m: 0.20,
                     rear_drive_traction_assist_min_factor: 0.55,
                     turret_range_m: 28.0,

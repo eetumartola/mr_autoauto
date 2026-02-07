@@ -192,6 +192,10 @@ environment = "ice"
 - [done] A4. Basic asset registry (sprites, placeholder polygons/boxes, audio placeholders).
 - [done] A5. Minimal debug overlay (FPS, distance, active segment, enemy count).
 - [done] A6. Commentary stub pipeline (event queue + debug text output, no network).
+- [done] A7. Vehicle/physics live tuning panel:
+  - toggle with `V`; sliders + free-form float input per parameter.
+  - edits apply live in-memory during run.
+  - `Apply` writes current values back to `config/vehicles.toml`.
 
 **DoD**
 - Running build loads configs, spawns player + a background segment, no panics, shows HUD/debug.
@@ -229,6 +233,14 @@ environment = "ice"
   - add spring-damper behavior per tire with configurable rest length, stiffness, damping, and travel limits.
 - [done] BR4. Tire-ground contact and push response:
   - integrate tire contact, traction/slip tuning, and stable collision response between chassis/enemies/terrain.
+- [in progress] BR4a. Rapier migration pass for current driving dynamics:
+  - run vehicle body under `bevy_rapier2d` rigidbody/collider simulation.
+  - keep box-collider terrain for tuning pass before visual polish.
+  - preserve current control semantics (rear-drive traction, spring behavior, stunt telemetry) on top of Rapier.
+  - tune starter values from vehicle-physics references (spring frequency/damping ratio ranges) and validate against in-game feel.
+- [done] BR4b. Spline-style ground and measurement aid:
+  - replace jagged tower ground with thick extruded spline-strip segments for both visuals and fixed colliders.
+  - add lower-left yardstick overlay with 5m minor notches and 10m major notches.
 - [not started] BR5. 3D part asset schema and import pipeline:
   - define separate model refs for chassis/turret/tire parts and/or node-segment extraction from source model.
   - add config for attachment points/local offsets so parts mount at correct locations.
@@ -275,6 +287,9 @@ environment = "ice"
 - [done] D2. Enemy behaviors v0 (config-driven):
   - Walker (ground), Flier (sine hover), Turret (stationary shooter), Charger, Bomber (high straight flight + bomb drops).
 - [done] D3. Enemy shooting patterns (simple): aimed shots, arcs, spreads.
+- [done] D3a. Enemy body dynamics/collisions on Rapier:
+  - enemy bodies now run as Rapier dynamic rigidbodies/colliders (mass/friction/damping/gravity scale by behavior).
+  - removed custom enemy overlap impulse solver that caused oversized push impulses against player/enemies.
 - [not started] D4. Spawner system:
   - distance-based triggers, timed spawns, max alive, cooldown.
 - [not started] D5. Difficulty scaling:
@@ -414,6 +429,9 @@ environment = "ice"
 - A5 implementation detail: debug HUD now shows FPS, distance, active segment, enemy count, and commentary queue status.
 - Debug overlay visibility detail: overlay text now uses Bevy default UI font fallback (no bundled font required), keybind help is hidden by default, and `H` toggles it.
 - A6 implementation detail: commentary stub queue is active with key-driven events (`J` big jump, `K` kill, `C` crash), zero network dependency.
+- A7 implementation detail: added a `V`-toggled live vehicle tuning panel (egui) with slider + free-form float controls for all vehicle numeric constants; edits apply in-memory immediately during gameplay.
+- A7 persistence detail: tuning panel has `Apply To vehicles.toml`; on apply, it writes the selected vehicle values to `config/vehicles.toml`, reloads `GameConfig`, and rolls back file changes automatically if validation fails.
+- A7 safety detail: while the vehicle tuning panel is open, player HP damage intake is disabled (landing impacts, enemy projectile hits, and enemy contact damage).
 - B1-B4 implementation detail: Epic B now has keyboard input mapping (`D`/`Right` accelerate, `A`/`Left` brake), visible placeholder player+ground, flat-ground kinematics with grounded/airborne states, in-air pitch control, and speed-based camera follow.
 - Visual motion detail: temporary checkerboard pattern was added to both background and ground to make movement readability obvious during placeholder art phase.
 - Vehicle feel tuning detail: increased linear speed scaling/caps and replaced frame-based ground friction with time-based damping to produce clearer movement and stronger inertia.
@@ -457,6 +475,9 @@ environment = "ice"
 - BR1 implementation detail: player vehicle is now split into modular child entities (chassis, turret body, front/rear wheel pairs) under a 2D kinematic root transform.
 - BR1 visual debug detail: wheel pairs render as hexagons and rotate from vehicle linear speed so tire rotation is visibly readable.
 - BR2 implementation detail: drive acceleration is now rear-wheel-contact gated (rear-wheel drive); front wheel pair is explicitly non-driven.
+- Drivetrain update: drive split is now configurable via `vehicles.toml::front_drive_ratio`; starter car defaults to 30% front / 70% rear torque distribution.
+- Handling cap update: airborne angular velocity cap is now configurable via `vehicles.toml::air_max_rotation_speed` and is exposed in the `V` tuning panel.
+- Air-control behavior change: airborne A/D input now sets angular velocity directly (using `air_max_rotation_speed`) instead of applying rotational torque.
 - Vehicle placeholder tuning detail: wheel hexagons were scaled +20% and moved downward by half a wheel radius for stronger tire readability and stance.
 - BR3 implementation detail: added per-wheel spring-damper suspension state (front/rear) with config-driven rest length, stiffness, damping, and compression/extension travel limits.
 - BR4 implementation detail: tire-ground contact now drives traction/slip scaling from wheel compression; terrain penetration is corrected from wheel clearance, and vehicle stability is improved while preserving existing chassis-enemy push response.
@@ -468,12 +489,30 @@ environment = "ice"
 - BR4 suspension readability update: wheel visuals now exaggerate spring travel (render-only) so compression/extension is clearly visible; starter suspension retuned to `stiffness` 14.0, `damping` 2.0, travel `compression/extension` 0.46/0.46 with `rotational_inertia` at 1.8.
 - Run lifecycle reliability fix: all `InRun` gameplay entities are now explicitly cleaned up on `OnExit(GameState::InRun)` (vehicle scene, combat visuals/projectiles/FX, enemies/projectiles), preventing immediate re-death when restarting from Results.
 - Vehicle tuning tweak: starter-car `acceleration` in `vehicles.toml` was doubled (4.0 -> 8.0) to increase forward drive force.
+- Physics stack migration: `bevy_rapier2d` is now integrated and active; player vehicle is a Rapier dynamic rigid body with collider/forces, terrain checker columns now include fixed box colliders, and per-wheel suspension sampling uses Rapier raycasts against fixed ground colliders.
+- Migration constraint note: BR5 (3D part import/alignment) remains deferred; current focus is achieving good-feeling box-based dynamics first.
 - Maintenance note: `src/gameplay/vehicle/mod.rs` has grown past 1000 LOC; split into focused submodules (input/physics/visuals/telemetry) during BR5/BR6.
 - Scope decision: keep C6 audio/SFX placeholder wiring deferred for later iteration.
 - Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
 - Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
 - Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.
-- Physics direction for later epics: bevy_rapier2d.
+- Physics direction update: bevy_rapier2d is now the active runtime physics backend for ongoing vehicle dynamics tuning.
+- BR4a tuning update: chassis now uses explicit Rapier mass/inertia properties and a lowered center of mass; suspension force is applied along raycast contact normals; the old forced `velocity.y = 0` grounded clamp was removed so spring/jump behavior is driven by physics contacts.
+- BR4a tuning values update: starter-car suspension/traction/drive numbers in `vehicles.toml` were retuned for Rapier (`acceleration` 14.0, `suspension_stiffness` 170.0, `suspension_damping` 44.0, `rotational_inertia` 2.4, raised traction floor/assist).
+- Stability fix: player root now explicitly carries visibility inheritance components to avoid Bevy hierarchy warning `B0004` for visual children.
+- Stability fix: gameplay despawn calls were switched to `try_despawn()` to silence duplicate-despawn command warnings when multiple systems target the same entity in a frame.
+- BR4a suspension stability fix: corrected spring-damper sign so damping resists compression (prevents energy gain), restricted grounded hits to sufficiently upward-facing raycast normals, and applied spring support in world-up direction to avoid lateral impulse injection from checker-column side faces.
+- BR4a handling pass: increased starter acceleration 3x (`14 -> 42`) as requested; raised air pitch torque and changed air-control gating to use suspension support force threshold so A/D pitch control remains responsive while airborne.
+- BR4a anti-snap pass: wheel suspension now uses non-solid raycasts plus compression/rebound rate limits, and wheel visual spring length is lerped to reduce visible snapping to terrain steps.
+- BR4a stability pass: strengthened grounded angular damping to reduce excessive roll while driving without suppressing airborne rotation control.
+- BR4a handling adjustment: moved vehicle center of mass to the lower-edge midpoint of the chassis quad (`COM y = -0.54`), restored explicit airborne A/D torque path with only a small grounded torque factor, increased suspension damping (`44 -> 78`), and tightened rebound/compression rate limits to reduce bounce.
+- Ground representation update: replaced checker-tower terrain with thick spline-strip ground segments (visual + fixed colliders) to remove jagged side-face artifacts and improve contact continuity.
+- Traction safety fix: wheel suspension raycasts now use vehicle-local down direction with alignment gating, and rear-drive assist no longer grants fallback traction when no real wheel contact exists, preventing upside-down/air traction.
+- HUD utility: added a camera-anchored lower-left yardstick with 5m notches and emphasized 10m marks for scale readout while tuning.
+- BR4a tuning tweak: increased starter-car drive acceleration to `210.0` (5x prior) and in-air rolling torque (`air_pitch_torque`) to `180.0` (10x prior) per latest handling request.
+- BR4a tuning tweak: set starter-car weight proxy (`linear_inertia`) to `8.0` (10x prior) and tuned reverse force to 60% of forward by setting `brake_strength` to `126.0` while forward `acceleration` stays `210.0`.
+- Enemy physics migration update: enemy entities now use Rapier dynamic bodies/colliders with behavior-driven velocity steering; the previous custom enemy-enemy/player impulse resolver was removed to prevent extreme contact impulses.
+- Debug UI input fix: vehicle tuning panel rendering moved to `EguiPrimaryContextPass`, and `bevy_egui` is pinned to a Bevy-0.17-compatible version so panel buttons/sliders are clickable again.
 - AI commentary in early milestones is stub-first; real Neocortex integration is a dedicated later task.
 - Neocortex request flow to use later: /api/v2/chat then /api/v2/audio/generate.
 - Initial controls are keyboard A/D and Left/Right.
