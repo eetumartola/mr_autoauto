@@ -571,6 +571,9 @@ environment = "ice"
 - Splat camera motion update: parallax is now driven from the existing smoothed 2D gameplay camera transform (not raw player position), removing the double-motion feel; background X placement remains on the cloud transform.
 - Splat asset loading fix: asset registry now preloads Gaussian scene handles only for `.json` scene files; `.ply` / `.gcloud` paths are no longer sent through `GaussianSceneLoader`, eliminating repeated "only .json supported" load errors.
 - HUD/loading flow update: removed commentary debug diagnostics from the on-screen debug overlay, added run stats visibility (`score`, `kills`, `coins`, `health pickups`, stunt totals), and changed `Loading -> InRun` transition to wait for configured assets plus preloaded splat clouds to reach loaded/failed state before starting gameplay.
+- Commentary cost-control update: added `commentator.toml::[commentary].api_enabled` feature switch; when disabled, runtime skips Neocortex chat/audio calls entirely and emits immediate local fallback commentary lines.
+- Ground geometry refactor: replaced flat wedge sprites/cuboid ground colliders with a spline-driven extruded strip mesh (denser 1.2m divisions, UVs with `u` along strip scaled by strip width and `v` in `[0..1]` across strip width); physics now uses top-edge segment colliders, plus a separate visual-only behind-strip curtain mesh layer (world-space UV mapping scaled to ~255 px per UV tile at current camera scale).
+- Ground mesh continuity update: strip and curtain visuals are now rendered as continuous shared-vertex polystrips (not independent per-segment quads), with textures applied from `ground_strip.png` / `ground_curtain.png` (fallback to `textures/ground_strip.png` / `textures/ground_curtain.png`) using repeat sampling.
 
 ---
 ## 7) Recommended build sequence (milestones)

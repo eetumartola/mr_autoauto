@@ -822,6 +822,21 @@ fn process_commentary_queue(
     state.next_commentator_index =
         (state.next_commentator_index + 1) % config.commentator.commentators.len().max(1);
 
+    if !config.commentator.commentary.api_enabled {
+        state.api_status = "Neocortex API disabled by config, using fallback".to_string();
+        state.last_audio_path.clear();
+        state.pending_audio_path = None;
+        finalize_commentary_line(
+            &mut state,
+            &profile.id,
+            &speaker_name,
+            profile.subtitle_color,
+            fallback_line,
+            now,
+        );
+        return;
+    }
+
     let Some(api_key) = std::env::var(API_KEY_ENV)
         .ok()
         .filter(|value| !value.trim().is_empty())

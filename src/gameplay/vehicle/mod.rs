@@ -1,10 +1,14 @@
 use crate::config::GameConfig;
 use crate::debug::{DebugCameraPanState, DebugGameplayGuards};
 use crate::states::GameState;
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::primitives::RegularPolygon;
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::f32::consts::{PI, TAU};
+use std::path::Path;
 
 #[cfg(feature = "gaussian_splats")]
 use bevy_gaussian_splatting::{
@@ -15,11 +19,17 @@ use bevy_gaussian_splatting::{
 const CAMERA_ORTHO_SCALE_METERS: f32 = 0.05;
 const GROUND_WIDTH: f32 = 1_200.0;
 const WORLD_HALF_WIDTH: f32 = GROUND_WIDTH * 0.5;
-const GROUND_SPLINE_SEGMENT_WIDTH_M: f32 = 2.4;
+const GROUND_SPLINE_SEGMENT_WIDTH_M: f32 = 1.2;
 const GROUND_SPLINE_THICKNESS_M: f32 = 3.2;
-const GROUND_SPLINE_SEGMENT_OVERLAP_M: f32 = 0.45;
 const GROUND_SPLINE_Z: f32 = 0.1;
-const GROUND_SPLINE_TOP_STRIPE_HEIGHT_M: f32 = 0.36;
+const GROUND_CURTAIN_Z: f32 = GROUND_SPLINE_Z - 0.04;
+const GROUND_CURTAIN_BOTTOM_Y_M: f32 = -180.0;
+const GROUND_CURTAIN_UV_WORLD_UNITS_PER_TILE: f32 = CAMERA_ORTHO_SCALE_METERS * 255.0;
+const GROUND_CURTAIN_UV_SCALE: f32 = 1.0 / GROUND_CURTAIN_UV_WORLD_UNITS_PER_TILE;
+const GROUND_STRIP_TEXTURE_PRIMARY_PATH: &str = "ground_strip.png";
+const GROUND_STRIP_TEXTURE_FALLBACK_PATH: &str = "textures/ground_strip.png";
+const GROUND_CURTAIN_TEXTURE_PRIMARY_PATH: &str = "ground_curtain.png";
+const GROUND_CURTAIN_TEXTURE_FALLBACK_PATH: &str = "textures/ground_curtain.png";
 const BACKGROUND_WIDTH: f32 = 1_400.0;
 const BACKGROUND_BAND_HEIGHT: f32 = 60.0;
 const BACKGROUND_Y: f32 = 6.0;
@@ -177,6 +187,12 @@ struct GroundSplineSegment {
 
 #[derive(Component)]
 struct GroundPhysicsCollider;
+
+#[derive(Component)]
+struct GroundStripVisual;
+
+#[derive(Component)]
+struct GroundCurtainVisual;
 
 #[derive(Component)]
 struct YardstickVisualRoot;
@@ -523,53 +539,62 @@ fn spawn_vehicle_scene(
             ))
             .id();
 
-        let segment_count = (GROUND_WIDTH / GROUND_SPLINE_SEGMENT_WIDTH_M).ceil() as i32 + 2;
-        let ground_start_x = -WORLD_HALF_WIDTH - GROUND_SPLINE_SEGMENT_WIDTH_M;
+        let ground_profile = build_ground_profile_samples(&config);
+        let strip_mesh = meshes.add(build_ground_strip_mesh(&ground_profile));
+        let curtain_mesh = meshes.add(build_ground_curtain_mesh(&ground_profile));
+        let strip_texture_path = resolve_ground_texture_path(
+            GROUND_STRIP_TEXTURE_PRIMARY_PATH,
+            GROUND_STRIP_TEXTURE_FALLBACK_PATH,
+        );
+        let curtain_texture_path = resolve_ground_texture_path(
+            GROUND_CURTAIN_TEXTURE_PRIMARY_PATH,
+            GROUND_CURTAIN_TEXTURE_FALLBACK_PATH,
+        );
+        let strip_texture = load_repeating_texture(&asset_server, &strip_texture_path);
+        let curtain_texture = load_repeating_texture(&asset_server, &curtain_texture_path);
+        let strip_material = materials.add(ColorMaterial {
+            color: Color::WHITE,
+            texture: Some(strip_texture),
+            ..default()
+        });
+        let curtain_material = materials.add(ColorMaterial {
+            color: Color::WHITE,
+            texture: Some(curtain_texture),
+            ..default()
+        });
 
         commands.entity(ground_entity).with_children(|parent| {
-            for index in 0..segment_count {
-                let x0 = ground_start_x + (index as f32 * GROUND_SPLINE_SEGMENT_WIDTH_M);
-                let x1 = x0 + GROUND_SPLINE_SEGMENT_WIDTH_M;
-                let body_color = if index % 2 == 0 {
-                    Color::srgb(0.28, 0.33, 0.39)
-                } else {
-                    Color::srgb(0.18, 0.22, 0.27)
-                };
-                let (segment_center, segment_angle, segment_size) =
-                    ground_segment_pose(&config, x0, x1);
+            parent.spawn((
+                Name::new("GroundSplineStrip"),
+                GroundStripVisual,
+                Mesh2d(strip_mesh),
+                MeshMaterial2d(strip_material),
+                Transform::default(),
+            ));
 
-                parent
-                    .spawn((
-                        Name::new("GroundSplineSegment"),
-                        GroundSplineSegment { x0, x1 },
-                        GroundPhysicsCollider,
-                        RigidBody::Fixed,
-                        Collider::cuboid(segment_size.x * 0.5, segment_size.y * 0.5),
-                        Friction::coefficient(1.35),
-                        Restitution::coefficient(0.0),
-                        Sprite::from_color(body_color, segment_size),
-                        Transform::from_xyz(segment_center.x, segment_center.y, GROUND_SPLINE_Z)
-                            .with_rotation(Quat::from_rotation_z(segment_angle)),
-                    ))
-                    .with_children(|segment_parent| {
-                        segment_parent.spawn((
-                            Name::new("GroundSplineTopStripe"),
-                            Sprite::from_color(
-                                Color::srgb(0.58, 0.66, 0.73),
-                                Vec2::new(
-                                    segment_size.x,
-                                    GROUND_SPLINE_TOP_STRIPE_HEIGHT_M
-                                        .clamp(0.05, GROUND_SPLINE_THICKNESS_M),
-                                ),
-                            ),
-                            Transform::from_xyz(
-                                0.0,
-                                (GROUND_SPLINE_THICKNESS_M - GROUND_SPLINE_TOP_STRIPE_HEIGHT_M)
-                                    * 0.5,
-                                0.01,
-                            ),
-                        ));
-                    });
+            parent.spawn((
+                Name::new("GroundSplineCurtain"),
+                GroundCurtainVisual,
+                Mesh2d(curtain_mesh),
+                MeshMaterial2d(curtain_material),
+                Transform::default(),
+            ));
+
+            for segment in ground_profile.segments.iter().copied() {
+                parent.spawn((
+                    Name::new("GroundSplineColliderSegment"),
+                    GroundSplineSegment {
+                        x0: segment.x0,
+                        x1: segment.x1,
+                    },
+                    GroundPhysicsCollider,
+                    RigidBody::Fixed,
+                    Collider::segment(segment.top0, segment.top1),
+                    Friction::coefficient(1.35),
+                    Restitution::coefficient(0.0),
+                    Transform::default(),
+                    GlobalTransform::default(),
+                ));
             }
         });
     }
@@ -747,28 +772,33 @@ fn spin_wheel_pairs(
 #[allow(clippy::type_complexity)]
 fn update_ground_spline_segments(
     config: Res<GameConfig>,
-    mut terrain_tiles: Query<
-        (
-            &GroundSplineSegment,
-            &mut Transform,
-            &mut Collider,
-            &mut Sprite,
-        ),
-        With<GroundPhysicsCollider>,
-    >,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut collider_query: Query<(&GroundSplineSegment, &mut Collider), With<GroundPhysicsCollider>>,
+    strip_query: Query<&Mesh2d, With<GroundStripVisual>>,
+    curtain_query: Query<&Mesh2d, With<GroundCurtainVisual>>,
 ) {
     if !config.is_changed() {
         return;
     }
 
-    for (segment, mut transform, mut collider, mut sprite) in &mut terrain_tiles {
-        let (segment_center, segment_angle, segment_size) =
-            ground_segment_pose(&config, segment.x0, segment.x1);
-        transform.translation.x = segment_center.x;
-        transform.translation.y = segment_center.y;
-        transform.rotation = Quat::from_rotation_z(segment_angle);
-        *collider = Collider::cuboid(segment_size.x * 0.5, segment_size.y * 0.5);
-        sprite.custom_size = Some(segment_size);
+    let profile = build_ground_profile_samples(&config);
+
+    if let Ok(strip_mesh) = strip_query.single() {
+        if let Some(mesh) = meshes.get_mut(&strip_mesh.0) {
+            *mesh = build_ground_strip_mesh(&profile);
+        }
+    }
+
+    if let Ok(curtain_mesh) = curtain_query.single() {
+        if let Some(mesh) = meshes.get_mut(&curtain_mesh.0) {
+            *mesh = build_ground_curtain_mesh(&profile);
+        }
+    }
+
+    for (segment, mut collider) in &mut collider_query {
+        let top0 = Vec2::new(segment.x0, terrain_height_at_x(&config, segment.x0));
+        let top1 = Vec2::new(segment.x1, terrain_height_at_x(&config, segment.x1));
+        *collider = Collider::segment(top0, top1);
     }
 }
 
@@ -1562,20 +1592,181 @@ fn wheel_hardpoint_world(root_position: Vec2, root_z_rotation: f32, hardpoint_lo
     root_position + (Mat2::from_angle(root_z_rotation) * hardpoint_local)
 }
 
-fn ground_segment_pose(config: &GameConfig, x0: f32, x1: f32) -> (Vec2, f32, Vec2) {
-    let p0 = Vec2::new(x0, terrain_height_at_x(config, x0));
-    let p1 = Vec2::new(x1, terrain_height_at_x(config, x1));
-    let segment = p1 - p0;
-    let segment_length = segment.length().max(0.001);
-    let tangent = segment / segment_length;
-    let normal = Vec2::new(-tangent.y, tangent.x).normalize_or_zero();
-    let center = ((p0 + p1) * 0.5) - (normal * (GROUND_SPLINE_THICKNESS_M * 0.5));
-    let angle = tangent.y.atan2(tangent.x);
-    let size = Vec2::new(
-        segment_length + GROUND_SPLINE_SEGMENT_OVERLAP_M,
-        GROUND_SPLINE_THICKNESS_M,
+#[derive(Debug, Clone, Copy)]
+struct GroundProfilePoint {
+    x: f32,
+    top: Vec2,
+    bottom: Vec2,
+    u: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct GroundColliderSegmentSample {
+    x0: f32,
+    x1: f32,
+    top0: Vec2,
+    top1: Vec2,
+}
+
+#[derive(Debug, Clone)]
+struct GroundProfileSamples {
+    points: Vec<GroundProfilePoint>,
+    segments: Vec<GroundColliderSegmentSample>,
+}
+
+fn build_ground_profile_samples(config: &GameConfig) -> GroundProfileSamples {
+    let segment_count = (GROUND_WIDTH / GROUND_SPLINE_SEGMENT_WIDTH_M).ceil() as usize + 2;
+    let start_x = -WORLD_HALF_WIDTH - GROUND_SPLINE_SEGMENT_WIDTH_M;
+    let node_count = segment_count + 1;
+
+    let mut top_points = Vec::with_capacity(node_count);
+    for index in 0..node_count {
+        let x = start_x + (index as f32 * GROUND_SPLINE_SEGMENT_WIDTH_M);
+        top_points.push(Vec2::new(x, terrain_height_at_x(config, x)));
+    }
+
+    let mut points = Vec::with_capacity(node_count);
+    let strip_width = GROUND_SPLINE_THICKNESS_M.max(0.001);
+    let mut u_along = 0.0_f32;
+    for index in 0..node_count {
+        if index > 0 {
+            u_along += (top_points[index] - top_points[index - 1]).length() / strip_width;
+        }
+        let tangent = if index == 0 {
+            top_points[1] - top_points[0]
+        } else if index + 1 == node_count {
+            top_points[node_count - 1] - top_points[node_count - 2]
+        } else {
+            top_points[index + 1] - top_points[index - 1]
+        };
+        let normal = Vec2::new(-tangent.y, tangent.x).normalize_or_zero();
+        let safe_normal = if normal.length_squared() <= f32::EPSILON {
+            Vec2::Y
+        } else {
+            normal
+        };
+        let top = top_points[index];
+        let bottom = top - (safe_normal * GROUND_SPLINE_THICKNESS_M);
+
+        points.push(GroundProfilePoint {
+            x: top.x,
+            top,
+            bottom,
+            u: u_along,
+        });
+    }
+
+    let mut segments = Vec::with_capacity(segment_count);
+    for pair in points.windows(2) {
+        let left = pair[0];
+        let right = pair[1];
+        segments.push(GroundColliderSegmentSample {
+            x0: left.x,
+            x1: right.x,
+            top0: left.top,
+            top1: right.top,
+        });
+    }
+
+    GroundProfileSamples { points, segments }
+}
+
+fn build_ground_strip_mesh(profile: &GroundProfileSamples) -> Mesh {
+    let node_count = profile.points.len();
+    let mut positions = Vec::with_capacity(node_count * 2);
+    let mut normals = Vec::with_capacity(node_count * 2);
+    let mut uvs = Vec::with_capacity(node_count * 2);
+    let mut indices = Vec::with_capacity((node_count.saturating_sub(1)) * 6);
+
+    for point in &profile.points {
+        positions.push([point.top.x, point.top.y, GROUND_SPLINE_Z]);
+        positions.push([point.bottom.x, point.bottom.y, GROUND_SPLINE_Z]);
+        normals.push([0.0, 0.0, 1.0]);
+        normals.push([0.0, 0.0, 1.0]);
+        uvs.push([point.u, 0.0]);
+        uvs.push([point.u, 1.0]);
+    }
+
+    for index in 0..node_count.saturating_sub(1) {
+        let base = (index * 2) as u32;
+        indices.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
     );
-    (center, angle, size)
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn build_ground_curtain_mesh(profile: &GroundProfileSamples) -> Mesh {
+    let node_count = profile.points.len();
+    let mut positions = Vec::with_capacity(node_count * 2);
+    let mut normals = Vec::with_capacity(node_count * 2);
+    let mut uvs = Vec::with_capacity(node_count * 2);
+    let mut indices = Vec::with_capacity((node_count.saturating_sub(1)) * 6);
+
+    for point in &profile.points {
+        let curtain_top = point.bottom;
+        let curtain_bottom = Vec2::new(point.x, GROUND_CURTAIN_BOTTOM_Y_M);
+        positions.push([curtain_top.x, curtain_top.y, GROUND_CURTAIN_Z]);
+        positions.push([curtain_bottom.x, curtain_bottom.y, GROUND_CURTAIN_Z]);
+        normals.push([0.0, 0.0, 1.0]);
+        normals.push([0.0, 0.0, 1.0]);
+        uvs.push(curtain_world_uv(curtain_top));
+        uvs.push(curtain_world_uv(curtain_bottom));
+    }
+
+    for index in 0..node_count.saturating_sub(1) {
+        let base = (index * 2) as u32;
+        indices.extend_from_slice(&[base, base + 1, base + 2, base + 2, base + 1, base + 3]);
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+    mesh.insert_indices(Indices::U32(indices));
+    mesh
+}
+
+fn curtain_world_uv(world: Vec2) -> [f32; 2] {
+    [
+        world.x * GROUND_CURTAIN_UV_SCALE,
+        world.y * GROUND_CURTAIN_UV_SCALE,
+    ]
+}
+
+fn resolve_ground_texture_path(primary: &str, fallback: &str) -> String {
+    let primary_path = Path::new("assets").join(primary);
+    if primary_path.exists() {
+        return primary.to_string();
+    }
+
+    let fallback_path = Path::new("assets").join(fallback);
+    if fallback_path.exists() {
+        return fallback.to_string();
+    }
+
+    primary.to_string()
+}
+
+fn load_repeating_texture(asset_server: &AssetServer, path: &str) -> Handle<Image> {
+    asset_server.load_with_settings(path.to_string(), |settings: &mut ImageLoaderSettings| {
+        settings.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            address_mode_w: ImageAddressMode::Repeat,
+            ..ImageSamplerDescriptor::linear()
+        });
+    })
 }
 
 fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {

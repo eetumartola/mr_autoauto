@@ -1654,6 +1654,8 @@ pub struct CommentaryConfig {
     pub min_seconds_between_lines: f32,
     #[serde(default = "default_max_events_per_batch")]
     pub max_events_per_batch: usize,
+    #[serde(default = "default_commentary_api_enabled")]
+    pub api_enabled: bool,
     #[serde(default = "default_commentary_api_max_retries")]
     pub api_max_retries: u32,
     #[serde(default = "default_commentary_api_retry_backoff_seconds")]
@@ -1710,6 +1712,10 @@ fn default_max_events_per_batch() -> usize {
 
 fn default_commentary_api_max_retries() -> u32 {
     1
+}
+
+fn default_commentary_api_enabled() -> bool {
+    true
 }
 
 fn default_commentary_api_retry_backoff_seconds() -> f32 {
@@ -2039,6 +2045,7 @@ mod tests {
                 commentary: CommentaryConfig {
                     min_seconds_between_lines: 4.0,
                     max_events_per_batch: 4,
+                    api_enabled: true,
                     api_max_retries: 1,
                     api_retry_backoff_seconds: 0.75,
                     api_stale_request_timeout_seconds: 18.0,
