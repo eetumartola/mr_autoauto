@@ -1087,6 +1087,7 @@ fn keybind_overlay_text() -> &'static str {
     "Keybinds\n\
 H - Toggle this panel\n\
 V - Toggle vehicle tuning panel\n\
+A/D or Left/Right - Choose upgrade option (when shown)\n\
 F5 - Hot-reload config\n\
 D / Right - Accelerate\n\
 A / Left - Brake / reverse\n\

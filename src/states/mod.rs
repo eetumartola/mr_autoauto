@@ -1,5 +1,6 @@
 use crate::config::GameConfig;
 use crate::gameplay::combat::EnemyKilledEvent;
+use crate::gameplay::pickups::{PickupCollectedEvent, PickupKind};
 use crate::gameplay::vehicle::{
     PlayerHealth, PlayerVehicle, VehicleStuntMetrics, VehicleTelemetry,
 };
@@ -40,6 +41,7 @@ impl Plugin for GameStatePlugin {
                 (
                     update_run_summary_progress,
                     apply_kill_score_events,
+                    apply_pickup_score_events,
                     apply_stunt_score_sources,
                     finalize_run_summary_score,
                     trigger_results_on_player_death,
@@ -77,12 +79,16 @@ struct RunSummary {
     distance_m: f32,
     distance_score: u32,
     kill_score: u32,
+    pickup_score: u32,
     stunt_score: u32,
     airtime_score: u32,
     wheelie_score: u32,
     flip_score: u32,
     no_damage_bonus_score: u32,
     kill_count: u32,
+    coin_pickup_count: u32,
+    health_pickup_count: u32,
+    total_health_restored: f32,
     total_airtime_s: f32,
     total_wheelie_s: f32,
     flip_count: u32,
@@ -169,12 +175,16 @@ fn enter_in_run(mut run_summary: ResMut<RunSummary>) {
     run_summary.distance_m = 0.0;
     run_summary.distance_score = 0;
     run_summary.kill_score = 0;
+    run_summary.pickup_score = 0;
     run_summary.stunt_score = 0;
     run_summary.airtime_score = 0;
     run_summary.wheelie_score = 0;
     run_summary.flip_score = 0;
     run_summary.no_damage_bonus_score = 0;
     run_summary.kill_count = 0;
+    run_summary.coin_pickup_count = 0;
+    run_summary.health_pickup_count = 0;
+    run_summary.total_health_restored = 0.0;
     run_summary.total_airtime_s = 0.0;
     run_summary.total_wheelie_s = 0.0;
     run_summary.flip_count = 0;
@@ -258,6 +268,7 @@ fn finalize_run_summary_score(
     run_summary.score = run_summary
         .distance_score
         .saturating_add(run_summary.kill_score)
+        .saturating_add(run_summary.pickup_score)
         .saturating_add(run_summary.stunt_score)
         .saturating_add(run_summary.no_damage_bonus_score);
 }
@@ -292,6 +303,24 @@ fn apply_kill_score_events(
 
     if total_added > 0 {
         run_summary.kill_score = run_summary.kill_score.saturating_add(total_added);
+    }
+}
+
+fn apply_pickup_score_events(
+    mut pickup_events: MessageReader<PickupCollectedEvent>,
+    mut run_summary: ResMut<RunSummary>,
+) {
+    for event in pickup_events.read() {
+        run_summary.pickup_score = run_summary.pickup_score.saturating_add(event.score_added);
+        match event.kind {
+            PickupKind::Coin => {
+                run_summary.coin_pickup_count = run_summary.coin_pickup_count.saturating_add(1);
+            }
+            PickupKind::Health => {
+                run_summary.health_pickup_count = run_summary.health_pickup_count.saturating_add(1);
+                run_summary.total_health_restored += event.health_restored.max(0.0);
+            }
+        }
     }
 }
 
@@ -364,6 +393,7 @@ fn enter_results(mut commands: Commands, run_summary: Res<RunSummary>) {
         "Score: {score}\n\
 Distance: {distance:.1} m (+{distance_score})\n\
 Kills: {kill_count} (+{kill_score})\n\
+Pickups: {coin_pickups} coins (+{pickup_score}) | Health Crates: {health_pickups} (+{health_restored:.1} hp)\n\
 Stunts: +{stunt_score} (airtime +{airtime_score}, wheelie +{wheelie_score}, flips +{flip_score})\n\
 Airtime Total: {airtime_total:.2}s | Wheelie Total: {wheelie_total:.2}s | Flips: {flip_count}\n\
 Big/Huge Jumps: {big_jumps}/{huge_jumps} | Long Wheelies: {long_wheelies}\n\
@@ -375,6 +405,10 @@ Q - Quit",
         distance_score = run_summary.distance_score,
         kill_count = run_summary.kill_count,
         kill_score = run_summary.kill_score,
+        coin_pickups = run_summary.coin_pickup_count,
+        pickup_score = run_summary.pickup_score,
+        health_pickups = run_summary.health_pickup_count,
+        health_restored = run_summary.total_health_restored,
         stunt_score = run_summary.stunt_score,
         airtime_score = run_summary.airtime_score,
         wheelie_score = run_summary.wheelie_score,

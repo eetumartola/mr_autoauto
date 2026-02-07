@@ -18,3 +18,56 @@ airtime_points_per_second = 14.0
 wheelie_points_per_second = 18.0
 flip_points = 120
 no_damage_bonus = 600
+
+[pickups]
+despawn_seconds = 18.0
+despawn_behind_player_m = 96.0
+gravity_mps2 = 22.0
+bounce_damping = 0.28
+ground_stop_speed_mps = 0.85
+ground_slide_damping = 0.94
+collection_radius_m = 1.45
+drop_horizontal_spread_mps = 4.2
+drop_vertical_speed_min_mps = 3.2
+drop_vertical_speed_max_mps = 5.8
+health_drop_chance = 0.24
+health_drop_heal_amount = 22.0
+coin_score_min = 8
+coin_score_scale = 0.55
+coin_radius_m = 0.32
+health_box_size_m = 0.62
+coin_pickup_radius_m = 0.44
+health_pickup_radius_m = 0.50
+coin_spin_speed_min_rad_s = 2.8
+coin_spin_speed_max_rad_s = 5.2
+health_spin_speed_min_rad_s = -3.2
+health_spin_speed_max_rad_s = 3.2
+coin_jitter_x_m = 0.24
+coin_jitter_y_m = 0.18
+health_jitter_x_m = 0.28
+health_jitter_y_m = 0.14
+
+[run_upgrades]
+coins_per_offer = 5
+choices_per_offer = 2
+
+[[run_upgrades.options]]
+id = "health_plus_10"
+label = "Health +10"
+effect = "health_flat"
+value = 10.0
+max_stacks = 50
+
+[[run_upgrades.options]]
+id = "gun_fire_rate_plus_10_percent"
+label = "Gun Fire Rate +10%"
+effect = "weapon_fire_rate_percent"
+value = 0.10
+max_stacks = 50
+
+[[run_upgrades.options]]
+id = "missile_fire_rate_plus_10_percent"
+label = "Missile Fire Rate +10%"
+effect = "missile_fire_rate_percent"
+value = 0.10
+max_stacks = 50

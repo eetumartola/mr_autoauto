@@ -701,13 +701,14 @@ fn apply_enemy_contact_damage_to_player(
     let dt = time.delta_secs();
 
     let mut total_contact_damage = 0.0;
-    let mut dead_enemies: Vec<(Entity, String)> = Vec::new();
+    let mut dead_enemies: Vec<(Entity, String, Vec2)> = Vec::new();
     let mut current_colliding_enemies = HashSet::new();
     for (enemy_entity, enemy_transform, enemy_hitbox, enemy_type_id, mut enemy_health) in
         &mut enemy_query
     {
+        let enemy_position = enemy_transform.translation.truncate();
         if enemy_health.current <= 0.0 {
-            dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
+            dead_enemies.push((enemy_entity, enemy_type_id.0.clone(), enemy_position));
             continue;
         }
 
@@ -736,7 +737,7 @@ fn apply_enemy_contact_damage_to_player(
                     * dt;
                 enemy_health.current = (enemy_health.current - crash_damage.max(0.0)).max(0.0);
                 if enemy_health.current <= 0.0 {
-                    dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
+                    dead_enemies.push((enemy_entity, enemy_type_id.0.clone(), enemy_position));
                 }
             }
         }
@@ -754,8 +755,11 @@ fn apply_enemy_contact_damage_to_player(
     }
     contact_tracker.currently_colliding = current_colliding_enemies;
 
-    for (enemy_entity, enemy_type_id) in dead_enemies {
-        killed_message_writer.write(EnemyKilledEvent { enemy_type_id });
+    for (enemy_entity, enemy_type_id, world_position) in dead_enemies {
+        killed_message_writer.write(EnemyKilledEvent {
+            enemy_type_id,
+            world_position,
+        });
         commands.entity(enemy_entity).try_despawn();
     }
 }

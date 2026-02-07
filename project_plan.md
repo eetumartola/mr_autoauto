@@ -331,11 +331,15 @@ environment = "ice"
 **Tasks**
 - [done] F1. Score sources:
   - distance, kills, stunts (airtime/wheelie/flip), "no damage" bonus.
-- [not started] F2. Currency drops (coins/parts).
-- [not started] F3. Upgrade selection UI:
-  - after boss / at checkpoints / on level-up, present 2-3 choices.
-- [not started] F4. Upgrade application system:
-  - modify weapon/vehicle params; stack rules.
+- [done] F2. Currency drops (coins/parts):
+  - enemies now drop collectible gold coin circles and occasional green health crates.
+  - coin pickups award score bonus; health pickups restore player HP.
+- [done] F3. Upgrade selection UI:
+  - coin milestone trigger implemented: every `game.toml::run_upgrades.coins_per_offer` coin pickups, an on-screen two-choice panel appears.
+  - choices are drawn from `game.toml::run_upgrades.options` with stack-cap filtering for future expansion beyond the current 3-option MVP.
+- [done] F4. Upgrade application system:
+  - implemented runtime application for MVP upgrades: `health +10`, `gun fire rate +10%`, `missile fire rate +10%`.
+  - upgrade definitions are data-driven (`effect`, `value`, `max_stacks`) and update live runtime config/player state.
 - [done] F5. Run end conditions:
   - health hits 0; show results screen with summary + restart.
 - [not started] F6. High score persistence (local file; for web use local storage if available later).
@@ -551,6 +555,10 @@ environment = "ice"
 - Commentary API robustness update: Neocortex worker now retries failed requests with configurable backoff and stale in-flight requests are timed out on the gameplay thread with immediate fallback subtitles.
 - Commentary audio update: generated narration files are now decoded into `AudioSource` assets at runtime and played through Bevy audio with configurable narration volume (`commentator.toml::commentary.narration_volume`).
 - Commentary audio compatibility fix: Neocortex WAV responses may contain placeholder RIFF/data sizes (`0xFFFFFFFF`); playback now normalizes these headers before decode and safely skips malformed/unknown payloads to avoid Bevy audio panics.
+- Epic F2 implementation update: enemy kills now emit world-positioned drop spawns (gold coin circles + green health crates), pickups have lightweight physics/ground bounce + despawn, and run summary now includes pickup score plus health restored totals.
+- Pickup tuning data update: pickup/drop behavior is now data-driven under `game.toml::[pickups]` (spawn chance, heal amount, score scaling, collection radius, lifetimes, gravity/bounce/spread, and visual size/radius knobs) for hot-reload iteration.
+- Epic F3/F4 MVP update: upgrade offers now trigger every 5 coin pickups (configurable) with two random in-run choices from (`health +10`, `gun fire rate +10%`, `missile fire rate +10%`), fully driven by `game.toml::[run_upgrades]` for future upgrade-list expansion.
+- Upgrade UX update: when an upgrade offer appears, gameplay now pauses and a centered 2-card choice overlay is shown; player picks left/right via `A/D` or arrow keys, and held input from before offer-open is ignored until keys are released and newly pressed.
 
 ---
 ## 7) Recommended build sequence (milestones)

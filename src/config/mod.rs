@@ -477,6 +477,192 @@ impl GameConfig {
                 "game.toml::scoring.wheelie_points_per_second must be >= 0".to_string(),
             ));
         }
+        if !self.game.pickups.despawn_seconds.is_finite()
+            || self.game.pickups.despawn_seconds <= 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.despawn_seconds must be > 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.despawn_behind_player_m.is_finite()
+            || self.game.pickups.despawn_behind_player_m < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.despawn_behind_player_m must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.gravity_mps2.is_finite() || self.game.pickups.gravity_mps2 < 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.gravity_mps2 must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.bounce_damping.is_finite()
+            || !(0.0..=1.0).contains(&self.game.pickups.bounce_damping)
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.bounce_damping must be in [0, 1]".to_string(),
+            ));
+        }
+        if !self.game.pickups.ground_stop_speed_mps.is_finite()
+            || self.game.pickups.ground_stop_speed_mps < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.ground_stop_speed_mps must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.ground_slide_damping.is_finite()
+            || !(0.0..=1.0).contains(&self.game.pickups.ground_slide_damping)
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.ground_slide_damping must be in [0, 1]".to_string(),
+            ));
+        }
+        if !self.game.pickups.collection_radius_m.is_finite()
+            || self.game.pickups.collection_radius_m <= 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.collection_radius_m must be > 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.drop_horizontal_spread_mps.is_finite()
+            || self.game.pickups.drop_horizontal_spread_mps < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.drop_horizontal_spread_mps must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.drop_vertical_speed_min_mps.is_finite()
+            || !self.game.pickups.drop_vertical_speed_max_mps.is_finite()
+            || self.game.pickups.drop_vertical_speed_min_mps < 0.0
+            || self.game.pickups.drop_vertical_speed_max_mps
+                < self.game.pickups.drop_vertical_speed_min_mps
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups drop vertical speed range is invalid".to_string(),
+            ));
+        }
+        if !self.game.pickups.health_drop_chance.is_finite()
+            || !(0.0..=1.0).contains(&self.game.pickups.health_drop_chance)
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.health_drop_chance must be in [0, 1]".to_string(),
+            ));
+        }
+        if !self.game.pickups.health_drop_heal_amount.is_finite()
+            || self.game.pickups.health_drop_heal_amount < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.health_drop_heal_amount must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.coin_score_scale.is_finite()
+            || self.game.pickups.coin_score_scale < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.coin_score_scale must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.coin_radius_m.is_finite() || self.game.pickups.coin_radius_m <= 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.coin_radius_m must be > 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.health_box_size_m.is_finite()
+            || self.game.pickups.health_box_size_m <= 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.health_box_size_m must be > 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.coin_pickup_radius_m.is_finite()
+            || self.game.pickups.coin_pickup_radius_m <= 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.coin_pickup_radius_m must be > 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.health_pickup_radius_m.is_finite()
+            || self.game.pickups.health_pickup_radius_m <= 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups.health_pickup_radius_m must be > 0".to_string(),
+            ));
+        }
+        if !self.game.pickups.coin_spin_speed_min_rad_s.is_finite()
+            || !self.game.pickups.coin_spin_speed_max_rad_s.is_finite()
+            || self.game.pickups.coin_spin_speed_min_rad_s
+                > self.game.pickups.coin_spin_speed_max_rad_s
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups coin spin speed range is invalid".to_string(),
+            ));
+        }
+        if !self.game.pickups.health_spin_speed_min_rad_s.is_finite()
+            || !self.game.pickups.health_spin_speed_max_rad_s.is_finite()
+            || self.game.pickups.health_spin_speed_min_rad_s
+                > self.game.pickups.health_spin_speed_max_rad_s
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups health spin speed range is invalid".to_string(),
+            ));
+        }
+        if !self.game.pickups.coin_jitter_x_m.is_finite()
+            || !self.game.pickups.coin_jitter_y_m.is_finite()
+            || !self.game.pickups.health_jitter_x_m.is_finite()
+            || !self.game.pickups.health_jitter_y_m.is_finite()
+            || self.game.pickups.coin_jitter_x_m < 0.0
+            || self.game.pickups.coin_jitter_y_m < 0.0
+            || self.game.pickups.health_jitter_x_m < 0.0
+            || self.game.pickups.health_jitter_y_m < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::pickups jitter values must be >= 0".to_string(),
+            ));
+        }
+        if self.game.run_upgrades.coins_per_offer == 0 {
+            return Err(ConfigError::Validation(
+                "game.toml::run_upgrades.coins_per_offer must be >= 1".to_string(),
+            ));
+        }
+        if self.game.run_upgrades.choices_per_offer == 0 {
+            return Err(ConfigError::Validation(
+                "game.toml::run_upgrades.choices_per_offer must be >= 1".to_string(),
+            ));
+        }
+        if self.game.run_upgrades.options.is_empty() {
+            return Err(ConfigError::Validation(
+                "game.toml::run_upgrades.options must include at least one option".to_string(),
+            ));
+        }
+        let mut seen_upgrade_ids = std::collections::HashSet::new();
+        for (index, option) in self.game.run_upgrades.options.iter().enumerate() {
+            if option.id.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "game.toml::run_upgrades.options[{index}].id cannot be empty"
+                )));
+            }
+            if !seen_upgrade_ids.insert(option.id.clone()) {
+                return Err(ConfigError::Validation(format!(
+                    "game.toml::run_upgrades.options contains duplicate id `{}`",
+                    option.id
+                )));
+            }
+            if option.label.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "game.toml::run_upgrades.options[{index}].label cannot be empty"
+                )));
+            }
+            if !option.value.is_finite() || option.value <= 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "game.toml::run_upgrades.options[{index}].value must be > 0"
+                )));
+            }
+            if option.max_stacks == 0 {
+                return Err(ConfigError::Validation(format!(
+                    "game.toml::run_upgrades.options[{index}].max_stacks must be >= 1"
+                )));
+            }
+        }
         if self.commentator.commentary.min_seconds_between_lines < 0.0 {
             return Err(ConfigError::Validation(
                 "commentator.toml::commentary.min_seconds_between_lines must be >= 0".to_string(),
@@ -705,6 +891,10 @@ pub struct GameFile {
     pub terrain: TerrainConfig,
     #[serde(default)]
     pub scoring: ScoringConfig,
+    #[serde(default)]
+    pub pickups: PickupConfig,
+    #[serde(default)]
+    pub run_upgrades: RunUpgradeConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -769,6 +959,275 @@ fn default_flip_points() -> u32 {
 
 fn default_no_damage_bonus() -> u32 {
     600
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PickupConfig {
+    #[serde(default = "default_pickup_despawn_seconds")]
+    pub despawn_seconds: f32,
+    #[serde(default = "default_pickup_despawn_behind_player_m")]
+    pub despawn_behind_player_m: f32,
+    #[serde(default = "default_pickup_gravity_mps2")]
+    pub gravity_mps2: f32,
+    #[serde(default = "default_pickup_bounce_damping")]
+    pub bounce_damping: f32,
+    #[serde(default = "default_pickup_ground_stop_speed_mps")]
+    pub ground_stop_speed_mps: f32,
+    #[serde(default = "default_pickup_ground_slide_damping")]
+    pub ground_slide_damping: f32,
+    #[serde(default = "default_pickup_collection_radius_m")]
+    pub collection_radius_m: f32,
+    #[serde(default = "default_pickup_drop_horizontal_spread_mps")]
+    pub drop_horizontal_spread_mps: f32,
+    #[serde(default = "default_pickup_drop_vertical_speed_min_mps")]
+    pub drop_vertical_speed_min_mps: f32,
+    #[serde(default = "default_pickup_drop_vertical_speed_max_mps")]
+    pub drop_vertical_speed_max_mps: f32,
+    #[serde(default = "default_pickup_health_drop_chance")]
+    pub health_drop_chance: f32,
+    #[serde(default = "default_pickup_health_drop_heal_amount")]
+    pub health_drop_heal_amount: f32,
+    #[serde(default = "default_pickup_coin_score_min")]
+    pub coin_score_min: u32,
+    #[serde(default = "default_pickup_coin_score_scale")]
+    pub coin_score_scale: f32,
+    #[serde(default = "default_pickup_coin_radius_m")]
+    pub coin_radius_m: f32,
+    #[serde(default = "default_pickup_health_box_size_m")]
+    pub health_box_size_m: f32,
+    #[serde(default = "default_pickup_coin_pickup_radius_m")]
+    pub coin_pickup_radius_m: f32,
+    #[serde(default = "default_pickup_health_pickup_radius_m")]
+    pub health_pickup_radius_m: f32,
+    #[serde(default = "default_pickup_coin_spin_speed_min_rad_s")]
+    pub coin_spin_speed_min_rad_s: f32,
+    #[serde(default = "default_pickup_coin_spin_speed_max_rad_s")]
+    pub coin_spin_speed_max_rad_s: f32,
+    #[serde(default = "default_pickup_health_spin_speed_min_rad_s")]
+    pub health_spin_speed_min_rad_s: f32,
+    #[serde(default = "default_pickup_health_spin_speed_max_rad_s")]
+    pub health_spin_speed_max_rad_s: f32,
+    #[serde(default = "default_pickup_coin_jitter_x_m")]
+    pub coin_jitter_x_m: f32,
+    #[serde(default = "default_pickup_coin_jitter_y_m")]
+    pub coin_jitter_y_m: f32,
+    #[serde(default = "default_pickup_health_jitter_x_m")]
+    pub health_jitter_x_m: f32,
+    #[serde(default = "default_pickup_health_jitter_y_m")]
+    pub health_jitter_y_m: f32,
+}
+
+impl Default for PickupConfig {
+    fn default() -> Self {
+        Self {
+            despawn_seconds: default_pickup_despawn_seconds(),
+            despawn_behind_player_m: default_pickup_despawn_behind_player_m(),
+            gravity_mps2: default_pickup_gravity_mps2(),
+            bounce_damping: default_pickup_bounce_damping(),
+            ground_stop_speed_mps: default_pickup_ground_stop_speed_mps(),
+            ground_slide_damping: default_pickup_ground_slide_damping(),
+            collection_radius_m: default_pickup_collection_radius_m(),
+            drop_horizontal_spread_mps: default_pickup_drop_horizontal_spread_mps(),
+            drop_vertical_speed_min_mps: default_pickup_drop_vertical_speed_min_mps(),
+            drop_vertical_speed_max_mps: default_pickup_drop_vertical_speed_max_mps(),
+            health_drop_chance: default_pickup_health_drop_chance(),
+            health_drop_heal_amount: default_pickup_health_drop_heal_amount(),
+            coin_score_min: default_pickup_coin_score_min(),
+            coin_score_scale: default_pickup_coin_score_scale(),
+            coin_radius_m: default_pickup_coin_radius_m(),
+            health_box_size_m: default_pickup_health_box_size_m(),
+            coin_pickup_radius_m: default_pickup_coin_pickup_radius_m(),
+            health_pickup_radius_m: default_pickup_health_pickup_radius_m(),
+            coin_spin_speed_min_rad_s: default_pickup_coin_spin_speed_min_rad_s(),
+            coin_spin_speed_max_rad_s: default_pickup_coin_spin_speed_max_rad_s(),
+            health_spin_speed_min_rad_s: default_pickup_health_spin_speed_min_rad_s(),
+            health_spin_speed_max_rad_s: default_pickup_health_spin_speed_max_rad_s(),
+            coin_jitter_x_m: default_pickup_coin_jitter_x_m(),
+            coin_jitter_y_m: default_pickup_coin_jitter_y_m(),
+            health_jitter_x_m: default_pickup_health_jitter_x_m(),
+            health_jitter_y_m: default_pickup_health_jitter_y_m(),
+        }
+    }
+}
+
+fn default_pickup_despawn_seconds() -> f32 {
+    18.0
+}
+
+fn default_pickup_despawn_behind_player_m() -> f32 {
+    96.0
+}
+
+fn default_pickup_gravity_mps2() -> f32 {
+    22.0
+}
+
+fn default_pickup_bounce_damping() -> f32 {
+    0.28
+}
+
+fn default_pickup_ground_stop_speed_mps() -> f32 {
+    0.85
+}
+
+fn default_pickup_ground_slide_damping() -> f32 {
+    0.94
+}
+
+fn default_pickup_collection_radius_m() -> f32 {
+    1.45
+}
+
+fn default_pickup_drop_horizontal_spread_mps() -> f32 {
+    4.2
+}
+
+fn default_pickup_drop_vertical_speed_min_mps() -> f32 {
+    3.2
+}
+
+fn default_pickup_drop_vertical_speed_max_mps() -> f32 {
+    5.8
+}
+
+fn default_pickup_health_drop_chance() -> f32 {
+    0.24
+}
+
+fn default_pickup_health_drop_heal_amount() -> f32 {
+    22.0
+}
+
+fn default_pickup_coin_score_min() -> u32 {
+    8
+}
+
+fn default_pickup_coin_score_scale() -> f32 {
+    0.55
+}
+
+fn default_pickup_coin_radius_m() -> f32 {
+    0.32
+}
+
+fn default_pickup_health_box_size_m() -> f32 {
+    0.62
+}
+
+fn default_pickup_coin_pickup_radius_m() -> f32 {
+    0.44
+}
+
+fn default_pickup_health_pickup_radius_m() -> f32 {
+    0.50
+}
+
+fn default_pickup_coin_spin_speed_min_rad_s() -> f32 {
+    2.8
+}
+
+fn default_pickup_coin_spin_speed_max_rad_s() -> f32 {
+    5.2
+}
+
+fn default_pickup_health_spin_speed_min_rad_s() -> f32 {
+    -3.2
+}
+
+fn default_pickup_health_spin_speed_max_rad_s() -> f32 {
+    3.2
+}
+
+fn default_pickup_coin_jitter_x_m() -> f32 {
+    0.24
+}
+
+fn default_pickup_coin_jitter_y_m() -> f32 {
+    0.18
+}
+
+fn default_pickup_health_jitter_x_m() -> f32 {
+    0.28
+}
+
+fn default_pickup_health_jitter_y_m() -> f32 {
+    0.14
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RunUpgradeConfig {
+    #[serde(default = "default_run_upgrade_coins_per_offer")]
+    pub coins_per_offer: u32,
+    #[serde(default = "default_run_upgrade_choices_per_offer")]
+    pub choices_per_offer: usize,
+    #[serde(default = "default_run_upgrade_options")]
+    pub options: Vec<RunUpgradeOptionConfig>,
+}
+
+impl Default for RunUpgradeConfig {
+    fn default() -> Self {
+        Self {
+            coins_per_offer: default_run_upgrade_coins_per_offer(),
+            choices_per_offer: default_run_upgrade_choices_per_offer(),
+            options: default_run_upgrade_options(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunUpgradeEffectKind {
+    HealthFlat,
+    WeaponFireRatePercent,
+    MissileFireRatePercent,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RunUpgradeOptionConfig {
+    pub id: String,
+    pub label: String,
+    pub effect: RunUpgradeEffectKind,
+    pub value: f32,
+    #[serde(default = "default_run_upgrade_max_stacks")]
+    pub max_stacks: u32,
+}
+
+fn default_run_upgrade_coins_per_offer() -> u32 {
+    5
+}
+
+fn default_run_upgrade_choices_per_offer() -> usize {
+    2
+}
+
+fn default_run_upgrade_max_stacks() -> u32 {
+    50
+}
+
+fn default_run_upgrade_options() -> Vec<RunUpgradeOptionConfig> {
+    vec![
+        RunUpgradeOptionConfig {
+            id: "health_plus_10".to_string(),
+            label: "Health +10".to_string(),
+            effect: RunUpgradeEffectKind::HealthFlat,
+            value: 10.0,
+            max_stacks: 50,
+        },
+        RunUpgradeOptionConfig {
+            id: "gun_fire_rate_plus_10_percent".to_string(),
+            label: "Gun Fire Rate +10%".to_string(),
+            effect: RunUpgradeEffectKind::WeaponFireRatePercent,
+            value: 0.10,
+            max_stacks: 50,
+        },
+        RunUpgradeOptionConfig {
+            id: "missile_fire_rate_plus_10_percent".to_string(),
+            label: "Missile Fire Rate +10%".to_string(),
+            effect: RunUpgradeEffectKind::MissileFireRatePercent,
+            value: 0.10,
+            max_stacks: 50,
+        },
+    ]
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1324,6 +1783,8 @@ mod tests {
                     wave_b_frequency: 0.041,
                 },
                 scoring: ScoringConfig::default(),
+                pickups: PickupConfig::default(),
+                run_upgrades: RunUpgradeConfig::default(),
             },
             assets: AssetsFile::default(),
             segments: SegmentsFile {

@@ -34,6 +34,7 @@ const FX_Z: f32 = 4.4;
 #[derive(Message, Debug, Clone)]
 pub struct EnemyKilledEvent {
     pub enemy_type_id: String,
+    pub world_position: Vec2,
 }
 
 pub struct CombatGameplayPlugin;
@@ -562,7 +563,7 @@ fn resolve_player_projectile_enemy_hits(
     for (enemy_entity, enemy_transform, hitbox, enemy_type_id, mut health) in &mut enemy_query {
         let enemy_position = enemy_transform.translation.truncate();
         if health.current <= 0.0 {
-            dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
+            dead_enemies.push((enemy_entity, enemy_type_id.0.clone(), enemy_position));
             explosion_fx_positions.push(enemy_position);
             continue;
         }
@@ -585,7 +586,7 @@ fn resolve_player_projectile_enemy_hits(
             impact_fx_positions.push((*projectile_position, *projectile_kind));
 
             if health.current <= 0.0 {
-                dead_enemies.push((enemy_entity, enemy_type_id.0.clone()));
+                dead_enemies.push((enemy_entity, enemy_type_id.0.clone(), enemy_position));
                 explosion_fx_positions.push(enemy_position);
                 break;
             } else {
@@ -612,8 +613,11 @@ fn resolve_player_projectile_enemy_hits(
         spawn_explosion_fx(&mut commands, position);
     }
 
-    for (enemy_entity, enemy_type_id) in dead_enemies {
-        killed_message_writer.write(EnemyKilledEvent { enemy_type_id });
+    for (enemy_entity, enemy_type_id, world_position) in dead_enemies {
+        killed_message_writer.write(EnemyKilledEvent {
+            enemy_type_id,
+            world_position,
+        });
         commands.entity(enemy_entity).try_despawn();
     }
 }
