@@ -501,6 +501,13 @@ impl GameConfig {
                 "game.toml::terrain wave frequencies must be >= 0".to_string(),
             ));
         }
+        if !self.game.terrain.ground_lowering_m.is_finite()
+            || self.game.terrain.ground_lowering_m < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::terrain.ground_lowering_m must be >= 0".to_string(),
+            ));
+        }
         if !self.game.scoring.points_per_meter.is_finite()
             || self.game.scoring.points_per_meter < 0.0
         {
@@ -962,6 +969,8 @@ pub struct TerrainConfig {
     pub wave_c_amplitude: f32,
     #[serde(default = "default_terrain_wave_c_frequency")]
     pub wave_c_frequency: f32,
+    #[serde(default = "default_terrain_ground_lowering_m")]
+    pub ground_lowering_m: f32,
 }
 
 fn default_terrain_wave_c_amplitude() -> f32 {
@@ -969,6 +978,10 @@ fn default_terrain_wave_c_amplitude() -> f32 {
 }
 
 fn default_terrain_wave_c_frequency() -> f32 {
+    0.0
+}
+
+fn default_terrain_ground_lowering_m() -> f32 {
     0.0
 }
 
@@ -1890,6 +1903,7 @@ mod tests {
                     wave_b_frequency: 0.041,
                     wave_c_amplitude: 0.0,
                     wave_c_frequency: 0.0,
+                    ground_lowering_m: 0.0,
                 },
                 scoring: ScoringConfig::default(),
                 pickups: PickupConfig::default(),

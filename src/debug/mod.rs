@@ -1,4 +1,4 @@
-use crate::config::{BackgroundConfig, GameConfig, VehicleConfig};
+use crate::config::{BackgroundConfig, GameConfig, TerrainConfig, VehicleConfig};
 use crate::gameplay::vehicle::{
     PlayerVehicle, VehicleInputState, VehicleStuntMetrics, VehicleTelemetry,
 };
@@ -216,10 +216,11 @@ struct BackgroundTuningParams {
     scale_y: f32,
     scale_z: f32,
     loop_length_m: f32,
+    ground_lowering_m: f32,
 }
 
 impl BackgroundTuningParams {
-    fn from_background(background: &BackgroundConfig) -> Self {
+    fn from_config(background: &BackgroundConfig, terrain: &TerrainConfig) -> Self {
         Self {
             parallax: background.parallax,
             offset_x_m: background.offset_x_m,
@@ -229,6 +230,7 @@ impl BackgroundTuningParams {
             scale_y: background.scale_y,
             scale_z: background.scale_z,
             loop_length_m: background.loop_length_m,
+            ground_lowering_m: terrain.ground_lowering_m,
         }
     }
 
@@ -241,6 +243,10 @@ impl BackgroundTuningParams {
         background.scale_y = self.scale_y;
         background.scale_z = self.scale_z;
         background.loop_length_m = self.loop_length_m;
+    }
+
+    fn apply_to_terrain(&self, terrain: &mut TerrainConfig) {
+        terrain.ground_lowering_m = self.ground_lowering_m;
     }
 }
 
@@ -444,7 +450,7 @@ fn update_debug_overlay_text(
         };
 
     *text = Text::new(format!(
-        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nScore: {score} | Kills: {kills} | Coins: {coins} | Health Crates: {health_pickups}\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2}) | Total: {air_total:>5.2}s\nWheelie Best: {wheelie_best:>4.2}s | Total: {wheelie_total:>5.2}s\nFlips: {flips} | Crashes: {crashes} | Big/Huge Jumps: {big_jumps}/{huge_jumps}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nCamera Pan Offset: {camera_pan_offset:>6.1} m\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nHotkeys: H help | V vehicle tune | B background tune | O/P pan camera | F5 reload config | J big jump | K kill | C crash",
+        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nScore: {score} | Kills: {kills} | Coins: {coins} | Health Crates: {health_pickups}\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2}) | Total: {air_total:>5.2}s\nWheelie Best: {wheelie_best:>4.2}s | Total: {wheelie_total:>5.2}s\nFlips: {flips} | Crashes: {crashes} | Big/Huge Jumps: {big_jumps}/{huge_jumps}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nCamera Pan Offset: {camera_pan_offset:>6.1} m\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nHotkeys: H help | V vehicle tune | B background tune | O/P pan camera | N dump model | F5 reload config | J big jump | K kill | C crash",
         distance = run_stats.distance_m,
         player_x = player_x,
         speed = run_stats.speed_mps,
@@ -973,13 +979,20 @@ fn background_tuning_panel_ui(
                 0.0..=5000.0,
                 0.1,
             );
+            params_changed |= tuning_slider_row(
+                ui,
+                "ground_lowering_m",
+                &mut params.ground_lowering_m,
+                0.0..=120.0,
+                0.05,
+            );
 
             ui.separator();
             ui.horizontal(|ui| {
                 if ui.button("Reload From Config").clicked() {
                     reload_clicked = true;
                 }
-                if ui.button("Apply To backgrounds.toml").clicked() {
+                if ui.button("Apply To backgrounds.toml + game.toml").clicked() {
                     apply_clicked = true;
                 }
             });
@@ -1013,7 +1026,11 @@ fn background_tuning_panel_ui(
     }
 
     if apply_clicked {
-        match persist_background_tuning_and_reload(&mut config, &background_id, &params) {
+        match persist_background_and_terrain_tuning_and_reload(
+            &mut config,
+            &background_id,
+            &params,
+        ) {
             Ok(message) => {
                 panel_state.status = message;
                 if let Err(error) =
@@ -1100,7 +1117,10 @@ fn sync_background_panel_state_from_config(
     };
 
     panel_state.source_background_id = background_id;
-    panel_state.params = Some(BackgroundTuningParams::from_background(background));
+    panel_state.params = Some(BackgroundTuningParams::from_config(
+        background,
+        &config.game.terrain,
+    ));
     Ok(())
 }
 
@@ -1135,6 +1155,8 @@ fn apply_background_tuning_to_runtime_config(
     background_id: &str,
     params: &BackgroundTuningParams,
 ) -> Result<(), String> {
+    params.apply_to_terrain(&mut config.game.terrain);
+
     let Some(background) = config.backgrounds_by_id.get_mut(background_id) else {
         return Err(format!(
             "Background tuning panel: runtime background `{background_id}` not found in backgrounds_by_id."
@@ -1195,40 +1217,56 @@ fn persist_vehicle_tuning_and_reload(
     }
 }
 
-fn persist_background_tuning_and_reload(
+fn persist_background_and_terrain_tuning_and_reload(
     config: &mut GameConfig,
     background_id: &str,
     params: &BackgroundTuningParams,
 ) -> Result<String, String> {
-    let path = Path::new("config").join("backgrounds.toml");
-    let original_raw = fs::read_to_string(&path)
-        .map_err(|error| format!("Failed reading `{}`: {error}", path.display()))?;
-    let mut root: toml::Value = toml::from_str(&original_raw)
-        .map_err(|error| format!("Failed parsing `{}`: {error}", path.display()))?;
+    let backgrounds_path = Path::new("config").join("backgrounds.toml");
+    let game_path = Path::new("config").join("game.toml");
 
-    write_background_params_to_toml_value(&mut root, background_id, params)?;
+    let original_backgrounds_raw = fs::read_to_string(&backgrounds_path)
+        .map_err(|error| format!("Failed reading `{}`: {error}", backgrounds_path.display()))?;
+    let original_game_raw = fs::read_to_string(&game_path)
+        .map_err(|error| format!("Failed reading `{}`: {error}", game_path.display()))?;
 
-    let updated_raw = toml::to_string_pretty(&root)
+    let mut backgrounds_root: toml::Value = toml::from_str(&original_backgrounds_raw)
+        .map_err(|error| format!("Failed parsing `{}`: {error}", backgrounds_path.display()))?;
+    let mut game_root: toml::Value = toml::from_str(&original_game_raw)
+        .map_err(|error| format!("Failed parsing `{}`: {error}", game_path.display()))?;
+
+    write_background_params_to_toml_value(&mut backgrounds_root, background_id, params)?;
+    write_terrain_params_to_game_toml_value(&mut game_root, params)?;
+
+    let updated_backgrounds_raw = toml::to_string_pretty(&backgrounds_root)
         .map_err(|error| format!("Failed serializing backgrounds TOML: {error}"))?;
-    fs::write(&path, updated_raw)
-        .map_err(|error| format!("Failed writing `{}`: {error}", path.display()))?;
+    let updated_game_raw = toml::to_string_pretty(&game_root)
+        .map_err(|error| format!("Failed serializing game TOML: {error}"))?;
+
+    fs::write(&backgrounds_path, updated_backgrounds_raw)
+        .map_err(|error| format!("Failed writing `{}`: {error}", backgrounds_path.display()))?;
+    fs::write(&game_path, updated_game_raw)
+        .map_err(|error| format!("Failed writing `{}`: {error}", game_path.display()))?;
 
     match GameConfig::load_from_dir(Path::new("config")) {
         Ok(new_config) => {
             *config = new_config;
             Ok(format!(
-                "Applied tuning and saved to {}.",
-                path.to_string_lossy()
+                "Applied tuning and saved to {} and {}.",
+                backgrounds_path.to_string_lossy(),
+                game_path.to_string_lossy()
             ))
         }
         Err(error) => {
-            let _ = fs::write(&path, original_raw);
+            let _ = fs::write(&backgrounds_path, original_backgrounds_raw);
+            let _ = fs::write(&game_path, original_game_raw);
             if let Ok(restored) = GameConfig::load_from_dir(Path::new("config")) {
                 *config = restored;
             }
             Err(format!(
-                "Apply failed validation: {error}. Reverted `{}`.",
-                path.display()
+                "Apply failed validation: {error}. Reverted `{}` and `{}`.",
+                backgrounds_path.display(),
+                game_path.display()
             ))
         }
     }
@@ -1404,6 +1442,18 @@ fn write_background_params_to_toml_value(
     Ok(())
 }
 
+fn write_terrain_params_to_game_toml_value(
+    root: &mut toml::Value,
+    params: &BackgroundTuningParams,
+) -> Result<(), String> {
+    let Some(terrain_table) = root.get_mut("terrain").and_then(toml::Value::as_table_mut) else {
+        return Err("game.toml: missing or invalid `terrain` table".to_string());
+    };
+
+    set_toml_float(terrain_table, "ground_lowering_m", params.ground_lowering_m)?;
+    Ok(())
+}
+
 fn set_toml_float(
     table: &mut toml::map::Map<String, toml::Value>,
     key: &str,
@@ -1430,6 +1480,7 @@ A / Left - Brake / reverse\n\
 J - Queue BigJump commentary event\n\
 K - Queue Kill commentary event\n\
 C - Queue Crash commentary event\n\
+N - Dump loaded vehicle model scene info\n\
 Esc - Pause / resume\n\
 R - Open results\n\
 Enter - Pause -> results\n\

@@ -12,16 +12,33 @@ path = "sprites/turret_base.png"
 
 [[models]]
 id = "vehicle_starter_car"
-scene_path = "models/vehicles/starter_car.glb#Scene0"
-root_node = "CarRoot"
-wheel_nodes = ["WheelFL", "WheelFR", "WheelRL", "WheelRR"]
-turret_node = "Turret"
+scene_path = "models/vehicles/car_rally.glb#Scene0"
+root_node = "geometry_0.root.0"
+wheel_nodes = [
+  "geometry_0.004.root.3",
+  "geometry_0.006.root.5",
+  "geometry_0.005.root.4",
+  "geometry_0.003.root.2",
+]
+turret_node = "geometry_0.002.root.1"
 
 [[models]]
 id = "enemy_grunt_model"
 scene_path = "models/enemies/grunt.glb#Scene0"
 root_node = "GruntRoot"
 wheel_nodes = ["WheelDummy"]
+
+[[models]]
+id = "enemy_roadside_turret"
+scene_path = "models/enemies/owl_tower.glb#Scene0"
+root_node = "ROOT"
+wheel_nodes = ["ROOT"]
+
+[[models]]
+id = "enemy_high_bomber"
+scene_path = "models/enemies/owl_bomber.glb#Scene0"
+root_node = "ROOT"
+wheel_nodes = ["ROOT"]
 
 [[splats]]
 id = "museum_hall_01"

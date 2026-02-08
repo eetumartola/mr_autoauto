@@ -241,13 +241,15 @@ environment = "ice"
 - [done] BR4b. Spline-style ground and measurement aid:
   - replace jagged tower ground with thick extruded spline-strip segments for both visuals and fixed colliders.
   - add lower-left yardstick overlay with 5m minor notches and 10m major notches.
-- [not started] BR5. 3D part asset schema and import pipeline:
+- [in progress] BR5. 3D part asset schema and import pipeline:
   - define separate model refs for chassis/turret/tire parts and/or node-segment extraction from source model.
   - add config for attachment points/local offsets so parts mount at correct locations.
 - [not started] BR6. Runtime assembly + validation:
   - assemble parts into correct hierarchy at spawn, keep transforms synchronized, and add debug checks for misalignment/scale.
 - [not started] BR7. Visual migration pass:
   - replace coder-art placeholders with production part models while preserving physics/tuning behavior.
+- [not started] BR8. Gameplay mesh depth/parallax pass:
+  - decide/render strategy for player/enemy 3D meshes so they can have controlled depth/parallax without destabilizing the 2D gameplay readability.
 
 **DoD**
 - Player vehicle runs as modular chassis/turret/tire parts, rear-wheel drive is active, suspension travel is visible/stable, and imported 3D parts are correctly aligned at runtime.
@@ -308,7 +310,7 @@ environment = "ice"
 **Tasks**
 - [in progress] E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
   - first splat asset hook is active via `backgrounds.toml::splat_asset_id` + `assets.toml::splats` for `museum_hall_01`.
-  - [done] Added background placement tuning workflow (`B` debug panel): live `parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m` edits + `Apply To backgrounds.toml`.
+  - [done] Added background placement tuning workflow (`B` debug panel): live `parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m`, `ground_lowering_m` edits + apply persists to `backgrounds.toml` and `game.toml`.
 - [not started] E2. Segment placement:
   - concatenate along +x; maintain a "segment cursor" at current distance.
 - [not started] E3. Streaming:
@@ -427,155 +429,85 @@ environment = "ice"
 
 ---
 
-## 6.1) Decisions log (2026-02-06)
-- Start implementation scope with Epic A only.
-- Placeholder backgrounds are required now (simple quads/polygons), not real splat content yet.
-- Version pinning: Bevy 0.17 and bevy_gaussian_splatting v6.0.
-- Rust toolchain pinning for Bevy 0.17 compatibility: `rustc/cargo 1.88.0`.
-- `bevy_gaussian_splatting v6.0` is now integrated on stable via the vendored patch crate and enabled in default builds.
-- Long-term splat strategy: use a vendored/patch-crate version of `bevy_gaussian_splatting v6.0.0` without the nightly-only `#![feature(lazy_type_alias)]` gate, so builds stay on stable toolchain.
-- Vendored splat plugin maintenance: removed non-enforced type-alias generic bounds that caused recurring `type_alias_bounds` warnings during `cargo check` / `clippy`.
-- A2 implementation detail: `config/*.toml` is now loaded/merged at startup with fail-fast validation for cross-file IDs (environment, weapon, enemy, vehicle, spawner).
-- A3 implementation detail: press `F5` in-game to hot-reload all `config/*.toml`; invalid reloads are rejected and previous in-memory config stays active.
-- A4 implementation detail: `assets.toml` now defines sprite/model/splat/audio catalogs; model entries include hierarchy metadata (`root_node`, `wheel_nodes`, optional `turret_node`) for vehicle-style compositions.
-- A5 implementation detail: debug HUD now shows FPS, distance, active segment, enemy count, and commentary queue status.
-- Debug overlay visibility detail: overlay text now uses Bevy default UI font fallback (no bundled font required), keybind help is hidden by default, and `H` toggles it.
-- A6 implementation detail: commentary stub queue is active with key-driven events (`J` big jump, `K` kill, `C` crash), zero network dependency.
-- A7 implementation detail: added a `V`-toggled live vehicle tuning panel (egui) with slider + free-form float controls for all vehicle numeric constants; edits apply in-memory immediately during gameplay.
-- A7 persistence detail: tuning panel has `Apply To vehicles.toml`; on apply, it writes the selected vehicle values to `config/vehicles.toml`, reloads `GameConfig`, and rolls back file changes automatically if validation fails.
-- A7 safety detail: while the vehicle tuning panel is open, player HP damage intake is disabled (landing impacts, enemy projectile hits, and enemy contact damage).
-- B1-B4 implementation detail: Epic B now has keyboard input mapping (`D`/`Right` accelerate, `A`/`Left` brake), visible placeholder player+ground, flat-ground kinematics with grounded/airborne states, in-air pitch control, and speed-based camera follow.
-- Visual motion detail: temporary checkerboard pattern was added to both background and ground to make movement readability obvious during placeholder art phase.
-- Vehicle feel tuning detail: increased linear speed scaling/caps and replaced frame-based ground friction with time-based damping to produce clearer movement and stronger inertia.
-- B5 implementation detail: drivable ground now uses config-driven terrain height from `game.toml` with two overlapping sine waves plus optional ramp slope; checkerboard ground tiles follow this terrain profile.
-- Vehicle tuning config detail: speed caps, linear speed scale, damping/inertia, and camera look-ahead are now loaded from `vehicles.toml` per vehicle.
-- Terrain readability detail: placeholder ground rendering now uses extruded spline-like columns plus a ridge strip so terrain remains visible at gameplay speed.
-- Default driving tune detail: reduced starter-car top speed/look-ahead and adjusted damping in `vehicles.toml` for better readability while preserving inertia.
-- Stability fix detail: terrain hot-reload updater uses a single combined query for ridge/body tiles to avoid Bevy query-conflict panic (`B0001`).
-- Terrain visibility fix detail: ground tile parent transform is now identity (no vertical offset), so extruded terrain columns/ridge render at the actual spline height.
-- Scale normalization detail: removed dual-unit conversion; gameplay/physics/config/HUD now use meters directly, with camera orthographic scale adjusted for readable on-screen size.
-- B6 implementation detail: stunt metrics now track airtime (current/best), wheelie time (current/best), flip count, max speed, and crash count from hard/awkward landings; metrics are shown in debug HUD.
-- Vehicle mass/jump tuning detail: gravity scale is now vehicle-configurable in `vehicles.toml`; starter car gravity scale was reduced to make jumps possible.
-- Epic C targeting readability requirement: always show blue target laser and green target-cone boundaries; cone defaults to 60 degrees and is configurable/upgradable.
-- Commentary event-style decision: game systems should emit dry factual descriptors and thresholds (including big/huge buckets); narrator style/tone belongs to LLM output, not gameplay event text.
-- Vehicle handling tuning detail: starter car now uses mass/gravity at 70% of prior value, rotational inertia +20%, and linear inertia at 80% of prior value via new vehicle config knobs.
-- D1-D2 implementation detail: enemies are now visible quads with hitbox data and config-driven movement behaviors (walker/flier/turret/charger), enabling meaningful turret-targeting work before C1.
-- C1 implementation detail: player now has an always-on turret targeting overlay (blue aim laser + two green cone boundary lines parented to the car), with target selection constrained by configurable `turret_range_m` and `turret_cone_degrees` and priority mode (`nearest`/`strongest`) from `vehicles.toml`.
-- Bevy ECS stability note: turret visual sync uses disjoint `Query` filters (`Without`) to avoid B0001 transform-access conflicts; non-rendering parent entities that own rendered children now include visibility (`Visibility::Inherited`) to avoid B0004 hierarchy warnings.
-- C1 visual alignment fix: laser/cone line center translations are now projected along each line direction so all targeting lines originate at the turret mount on the car instead of crossing around an offset midpoint.
-- C1 readability tweak: turret cone and aim lines now render at 30% opacity.
-- Loading polish: `assets/sprites/autoauto_logo.jpg` is now shown during `Loading` for a minimum 0.75s before entering `InRun`.
-- Loading reliability fix: enabled Bevy `jpeg` feature and made `Loading -> InRun` wait for logo load completion (or fail-fast on load failure) so the logo is visible as soon as the window is up.
-- C2 implementation detail: auto-fire now uses `weapons.toml` data for `fire_rate`, `spread_degrees`, `burst_count`, `burst_interval_seconds`, and muzzle spawn offsets (`muzzle_offset_x/y`), spawning visible placeholder projectiles from the turret.
-- C3 implementation detail: projectile simulation now supports config-driven bullet drag plus missile ballistic gravity and optional bounded homing turn-rate, with projectile type selected by `weapons.toml::projectile_type`.
-- C3 stability fix: projectile simulation queries now use explicit `Without` filters between enemy and projectile transform access to avoid Bevy ECS B0001 conflicts at runtime.
-- Missile channel behavior update: player now has a separate optional secondary missile weapon slot (`vehicles.toml::secondary_weapon_id`) with independent cadence (`missile_fire_interval_seconds`, default 2.0s), so bullets and missiles auto-fire in parallel when a target is currently acquired; launched missiles continue homing by physics even if the target later leaves the cone.
-- Missile launch vector rule: secondary missiles now always launch along the upper cone boundary direction (not the current blue target ray) before homing behavior takes over.
-- C4 implementation detail: player projectiles now resolve 2D overlap against enemy hit radii, apply config-driven projectile damage to live enemy health, despawn consumed projectiles, and despawn enemies at zero HP (player shots do not damage player entities).
-- C5 implementation detail: combat feedback now includes projectile tracer sprites, hit impact sprites, enemy hit flash, and simple explosion quads; wounded enemies now show an HP bar above the unit (hidden at full health, visible once damaged).
-- C5 tracer readability update: projectile trails now render as attached solid multi-segment lines with per-segment alpha falloff (instead of time-spawned detached tracer pieces).
-- Projectile-ground interaction update: bullets and missiles now collide with terrain and despawn on ground impact, spawning impact FX (missiles also trigger explosion FX).
-- Player survivability update: player now has HP state and an in-world HP bar above the vehicle; crash-impact landings apply HP damage so the bar reflects vehicle health changes.
-- D3 implementation detail: enemies now fire back via behavior-driven patterns (walker/turret aimed shots, flier arcing shots, charger spreads), using their configured weapon IDs and weapon stats from TOML.
-- Enemy threat model update: player HP now also takes damage from enemy projectiles and from direct enemy overlap/contact (continuous damage while colliding, scaled by each enemy type's `contact_damage`).
-- Enemy roster update: added `bomber` behavior and a `high_bomber` config type for high, mostly straight flight pressure.
-- Run-end update: when player HP reaches 0 during `InRun`, the game now transitions automatically to `Results` and displays a run summary with score and distance.
-- Bomber behavior tuning update: bombers now fly 20% higher than the previous baseline and attack only by dropping free-falling bombs (no aimed pea-shooter fire).
-- Enemy body interaction update: enemies now resolve physical body overlap against player and each other, including size/mass-weighted pushback and impulse carry-over.
-- Scoring update: enemy types now have configurable `kill_score` in `enemy_types.toml`; kills award per-type score and results now show score with kill contribution breakdown.
-- Vehicle refinement scope decision: add Epic B+ for modular vehicle architecture (chassis/turret/tires), rear-wheel drive, suspension, and 3D part import/alignment workflow.
-- BR1 implementation detail: player vehicle is now split into modular child entities (chassis, turret body, front/rear wheel pairs) under a 2D kinematic root transform.
-- BR1 visual debug detail: wheel pairs render as hexagons and rotate from vehicle linear speed so tire rotation is visibly readable.
-- BR2 implementation detail: drive acceleration is now rear-wheel-contact gated (rear-wheel drive); front wheel pair is explicitly non-driven.
-- Drivetrain update: drive split is now configurable via `vehicles.toml::front_drive_ratio`; starter car defaults to 30% front / 70% rear torque distribution.
-- Handling cap update: airborne angular velocity cap is now configurable via `vehicles.toml::air_max_rotation_speed` and is exposed in the `V` tuning panel.
-- Air-control behavior change: airborne A/D input now sets angular velocity directly (using `air_max_rotation_speed`) instead of applying rotational torque.
-- F1 scoring implementation: `game.toml` now has a configurable `[scoring]` section (`points_per_meter`, airtime/wheelie points per second, flip points, no-damage bonus); run score now combines distance + kills + stunt score + no-damage bonus with full breakdown shown on Results.
-- Stunt counting/source update: `VehicleStuntMetrics` now tracks total airtime, total wheelie time, big/huge jump counts, long-wheelie count, and flips; these are now emitted as `VehicleStuntEvent` messages (big/huge airtime landings, long wheelie streak, flip milestones) for upcoming AI commentator integration.
-- Epic G kickoff implementation: commentary stub now uses a typed `GameEvent` model and automatic ingestion from gameplay signals (stunts, kills, speed tiers, near-death, crashes), while keeping manual `J/K/C` trigger hooks for debugging.
-- Epic G aggregation groundwork: queue processing now has per-event-class anti-spam cooldowns + priority ordering and routes emitted lines in round-robin across two commentator IDs, with previous other-speaker line retained as context for the next line builder.
-- G2 batching implementation: commentary queue now emits compact multi-event summaries (up to four events per line) with de-duplication by aggregation (kills/crashes/speed tiers/jumps/wheelies/flips/near-death/streak) before emission.
-- G3 prompt-builder implementation (stub stage): each pending line now has a generated prompt preview containing run context (`segment`, `distance_m`, `speed_mps`, `health_fraction`, `kill_streak`), previous other-commentator line, thresholds, and a dry-output instruction.
-- Debug visibility update: overlay now shows `Commentary Next Summary` and `Commentary Prompt Preview` so current text-to-send can be inspected before cooldown release.
-- G3 style config update: `commentator.toml` now defines two `[[commentators]]` profiles (id/tone/length/profanity/subtitle color) and commentary knobs (`max_events_per_batch`, per-commentator `style_instruction`); prompt previews now include the selected commentator style block.
-- Debug commentary preview update: overlay now includes `Commentary Pending Speaker` in addition to summary/prompt previews, matching round-robin commentator selection from config.
-- Milestone status update: BR4a (Rapier migration/tuning pass) is now considered done for this iteration; further vehicle feel polish continues as follow-up tuning work, not as a blocker for Epic G.
-- Emotion randomization update: each commentator now has a configurable emotion list; per-line emotion is selected randomly from that commentator profile, with `chat_emotion` emitted lowercase and `voice_emotion` emitted uppercase in the prompt payload.
-- Camera stability fix: camera follow now smooths look-ahead offsets and limits per-frame look-ahead change, preventing visible x-axis jerks when collision impulses spike instantaneous vehicle velocity.
-- Vehicle placeholder tuning detail: wheel hexagons were scaled +20% and moved downward by half a wheel radius for stronger tire readability and stance.
-- BR3 implementation detail: added per-wheel spring-damper suspension state (front/rear) with config-driven rest length, stiffness, damping, and compression/extension travel limits.
-- BR4 implementation detail: tire-ground contact now drives traction/slip scaling from wheel compression; terrain penetration is corrected from wheel clearance, and vehicle stability is improved while preserving existing chassis-enemy push response.
-- Traction stability tuning: rear-wheel drive now includes a configurable near-ground traction assist window (default 20 cm) to reduce micro-hop traction loss; reverse torque now uses the same rear-drive contact path so forward/reverse traction is consistent.
-- BR4 regression fix detail: if front wheel is grounded and rear wheel hovers near terrain, rear-drive assist now extends to a fallback assist window (0.30 m) so forward acceleration does not deadlock.
-- BR4 handling tweak: removed vertical wheel/chassis snap-to-ground behavior to preserve throttle/wheelie balance nuance; slope alignment remains in place.
-- Enemy damage tuning: `enemy_bomb_drop` weapon damage was doubled (9.0 -> 18.0).
-- BR4 handling tuning: removed forced terrain-angle alignment entirely and reduced grounded angular damping (`0.80 -> 0.94`); added a stronger rear-drive fallback assist path (support-aware, fallback distance 0.90 m) to avoid deadlock when perched.
-- BR4 suspension readability update: wheel visuals now exaggerate spring travel (render-only) so compression/extension is clearly visible; starter suspension retuned to `stiffness` 14.0, `damping` 2.0, travel `compression/extension` 0.46/0.46 with `rotational_inertia` at 1.8.
-- Run lifecycle reliability fix: all `InRun` gameplay entities are now explicitly cleaned up on `OnExit(GameState::InRun)` (vehicle scene, combat visuals/projectiles/FX, enemies/projectiles), preventing immediate re-death when restarting from Results.
-- Vehicle tuning tweak: starter-car `acceleration` in `vehicles.toml` was doubled (4.0 -> 8.0) to increase forward drive force.
-- Physics stack migration: `bevy_rapier2d` is now integrated and active; player vehicle is a Rapier dynamic rigid body with collider/forces, terrain checker columns now include fixed box colliders, and per-wheel suspension sampling uses Rapier raycasts against fixed ground colliders.
-- Migration constraint note: BR5 (3D part import/alignment) remains deferred; current focus is achieving good-feeling box-based dynamics first.
-- Maintenance note: `src/gameplay/vehicle/mod.rs` has grown past 1000 LOC; split into focused submodules (input/physics/visuals/telemetry) during BR5/BR6.
-- Scope decision: keep C6 audio/SFX placeholder wiring deferred for later iteration.
-- Validation policy: run `gaussian_splats` feature checks only when changes touch splat/rendering integration.
-- Ground pipeline decision: move terrain authoring/import workflow from Epic B to the end of Epic E.
-- Commentary decision: use two commentators in round-robin order; each prompt includes what the other commentator said last; subtitles are always shown with speaker-specific colors.
-- Physics direction update: bevy_rapier2d is now the active runtime physics backend for ongoing vehicle dynamics tuning.
-- BR4a tuning update: chassis now uses explicit Rapier mass/inertia properties and a lowered center of mass; suspension force is applied along raycast contact normals; the old forced `velocity.y = 0` grounded clamp was removed so spring/jump behavior is driven by physics contacts.
-- BR4a tuning values update: starter-car suspension/traction/drive numbers in `vehicles.toml` were retuned for Rapier (`acceleration` 14.0, `suspension_stiffness` 170.0, `suspension_damping` 44.0, `rotational_inertia` 2.4, raised traction floor/assist).
-- Stability fix: player root now explicitly carries visibility inheritance components to avoid Bevy hierarchy warning `B0004` for visual children.
-- Stability fix: gameplay despawn calls were switched to `try_despawn()` to silence duplicate-despawn command warnings when multiple systems target the same entity in a frame.
-- BR4a suspension stability fix: corrected spring-damper sign so damping resists compression (prevents energy gain), restricted grounded hits to sufficiently upward-facing raycast normals, and applied spring support in world-up direction to avoid lateral impulse injection from checker-column side faces.
-- BR4a handling pass: increased starter acceleration 3x (`14 -> 42`) as requested; raised air pitch torque and changed air-control gating to use suspension support force threshold so A/D pitch control remains responsive while airborne.
-- BR4a anti-snap pass: wheel suspension now uses non-solid raycasts plus compression/rebound rate limits, and wheel visual spring length is lerped to reduce visible snapping to terrain steps.
-- BR4a stability pass: strengthened grounded angular damping to reduce excessive roll while driving without suppressing airborne rotation control.
-- BR4a handling adjustment: moved vehicle center of mass to the lower-edge midpoint of the chassis quad (`COM y = -0.54`), restored explicit airborne A/D torque path with only a small grounded torque factor, increased suspension damping (`44 -> 78`), and tightened rebound/compression rate limits to reduce bounce.
-- Ground representation update: replaced checker-tower terrain with thick spline-strip ground segments (visual + fixed colliders) to remove jagged side-face artifacts and improve contact continuity.
-- Traction safety fix: wheel suspension raycasts now use vehicle-local down direction with alignment gating, and rear-drive assist no longer grants fallback traction when no real wheel contact exists, preventing upside-down/air traction.
-- HUD utility: added a camera-anchored lower-left yardstick with 5m notches and emphasized 10m marks for scale readout while tuning.
-- BR4a tuning tweak: increased starter-car drive acceleration to `210.0` (5x prior) and in-air rolling torque (`air_pitch_torque`) to `180.0` (10x prior) per latest handling request.
-- BR4a tuning tweak: set starter-car weight proxy (`linear_inertia`) to `8.0` (10x prior) and tuned reverse force to 60% of forward by setting `brake_strength` to `126.0` while forward `acceleration` stays `210.0`.
-- Enemy physics migration update: enemy entities now use Rapier dynamic bodies/colliders with behavior-driven velocity steering; the previous custom enemy-enemy/player impulse resolver was removed to prevent extreme contact impulses.
-- Debug UI input fix: vehicle tuning panel rendering moved to `EguiPrimaryContextPass`, and `bevy_egui` is pinned to a Bevy-0.17-compatible version so panel buttons/sliders are clickable again.
-- AI commentary in early milestones is stub-first; real Neocortex integration is a dedicated later task.
-- Neocortex request flow to use later: /api/v2/chat then /api/v2/audio/generate.
-- Initial controls are keyboard A/D and Left/Right.
-- Preferred narrator audio format for easiest playback: wav (fallback mp3 if needed).
-- `reference/voice_api_example.txt` was repaired and can be used as the API integration reference.
-- Neocortex integration update: commentary runtime now dispatches `/api/v2/chat` first and `/api/v2/audio/generate` second in a non-blocking background worker, using each commentator profile's `character_id`.
-- Session context update: per-commentator `session_id` values are now persisted between requests so George and jerry keep independent chat context.
-- Subtitle update: returned chat lines now appear as on-screen subtitles with speaker-specific colors from `commentator.toml`.
-- Fallback resilience update: when `NEOCORTEX_API_KEY` is missing or request fails/timeouts, the system emits dry fallback text immediately and keeps the game loop non-blocking.
-- Debug visibility update: overlay now shows commentary API request status and the last generated audio output file path.
-- Maintenance note: `src/commentary_stub/mod.rs` now exceeds 1000 LOC and should be split into focused modules (event ingestion/aggregation, Neocortex client, subtitle UI) in a follow-up cleanup pass.
-- Prompt format update: Neocortex chat prompts now omit `SPEAKER`/`CONTEXT` blocks; they include only `EMOTION`, `OTHER COMMENTATOR LAST LINE`, and dry `WHAT HAPPENED` facts while instructing the model to answer with colorful banter (no emoji/markdown).
-- Prompt control update: removed the hardcoded `OUTPUT_RULES` block from Neocortex prompts; style behavior is now controlled by per-commentator `style_instruction` entries in `commentator.toml`.
-- Subtitle readability tweak: commentary subtitle font size was reduced slightly for less visual dominance over gameplay.
-- Collision lethality tuning: player-enemy body collisions now apply high crash damage to enemies (speed-scaled) and can destroy enemies directly via contact.
-- Results screen polish: game-over/results view now uses a centered card panel with smaller body text for cleaner readability over gameplay.
-- Terrain tuning: reduced ground sine frequencies by 10% (`wave_a_frequency`, `wave_b_frequency`) to slightly smooth terrain undulation cadence.
-- Commentary event coverage update: gameplay now emits explicit player-damage events (projectile/contact source), bomb-hit events, and player-enemy crash-impact events for the AI commentary pipeline.
-- Commentary API robustness update: Neocortex worker now retries failed requests with configurable backoff and stale in-flight requests are timed out on the gameplay thread with immediate fallback subtitles.
-- Commentary audio update: generated narration files are now decoded into `AudioSource` assets at runtime and played through Bevy audio with configurable narration volume (`commentator.toml::commentary.narration_volume`).
-- Commentary audio compatibility fix: Neocortex WAV responses may contain placeholder RIFF/data sizes (`0xFFFFFFFF`); playback now normalizes these headers before decode and safely skips malformed/unknown payloads to avoid Bevy audio panics.
-- Epic F2 implementation update: enemy kills now emit world-positioned drop spawns (gold coin circles + green health crates), pickups have lightweight physics/ground bounce + despawn, and run summary now includes pickup score plus health restored totals.
-- Pickup tuning data update: pickup/drop behavior is now data-driven under `game.toml::[pickups]` (spawn chance, heal amount, score scaling, collection radius, lifetimes, gravity/bounce/spread, and visual size/radius knobs) for hot-reload iteration.
-- Epic F3/F4 MVP update: upgrade offers now trigger every 5 coin pickups (configurable) with two random in-run choices from (`health +10`, `gun fire rate +10%`, `missile fire rate +10%`), fully driven by `game.toml::[run_upgrades]` for future upgrade-list expansion.
-- Upgrade UX update: when an upgrade offer appears, gameplay now pauses and a centered 2-card choice overlay is shown; player picks left/right via `A/D` or arrow keys, and held input from before offer-open is ignored until keys are released and newly pressed.
-- Splat background prototype update: added `assets/splats/mystical.ply` as the first renderable Gaussian background for `museum_hall_01`, with parallax camera motion and one-time +Z depth sort at load (`SortMode::None` at runtime to avoid per-frame sorting).
-- Background tuning workflow update: added a `B`-toggled debug window for active segment background parameters (`parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m`) with live runtime edits and `Apply To backgrounds.toml` persistence.
-- Background transform update: background scales now allow negative values (non-zero required) so axis flips (for example Y-flip) can be done directly from config/debug tuning.
-- Terrain profile update: added a third long-wave sine layer (`wave_c_amplitude`, `wave_c_frequency`) to terrain sampling so coarse macro undulation can be tuned separately from medium/high frequency detail.
-- Debug camera utility update: added `O/P` horizontal camera pan (persistent offset) for runtime inspection while driving; overlay/help text now shows this control.
-- Commentary logging update: Neocortex prompt/response dumps were moved from `info!` to `debug!` so normal logs stay clean.
-- Splat camera motion update: parallax is now driven from the existing smoothed 2D gameplay camera transform (not raw player position), removing the double-motion feel; background X placement remains on the cloud transform.
-- Splat asset loading fix: asset registry now preloads Gaussian scene handles only for `.json` scene files; `.ply` / `.gcloud` paths are no longer sent through `GaussianSceneLoader`, eliminating repeated "only .json supported" load errors.
-- HUD/loading flow update: removed commentary debug diagnostics from the on-screen debug overlay, added run stats visibility (`score`, `kills`, `coins`, `health pickups`, stunt totals), and changed `Loading -> InRun` transition to wait for configured assets plus preloaded splat clouds to reach loaded/failed state before starting gameplay.
-- Commentary cost-control update: added `commentator.toml::[commentary].api_enabled` feature switch; when disabled, runtime skips Neocortex chat/audio calls entirely and emits immediate local fallback commentary lines.
-- Ground geometry refactor: replaced flat wedge sprites/cuboid ground colliders with a spline-driven extruded strip mesh (denser 1.2m divisions, UVs with `u` along strip scaled by strip width and `v` in `[0..1]` across strip width); physics now uses top-edge segment colliders, plus a separate visual-only behind-strip curtain mesh layer (world-space UV mapping scaled to ~255 px per UV tile at current camera scale).
-- Ground mesh continuity update: strip and curtain visuals are now rendered as continuous shared-vertex polystrips (not independent per-segment quads), with textures applied from `ground_strip.png` / `ground_curtain.png` (fallback to `textures/ground_strip.png` / `textures/ground_curtain.png`) using repeat sampling.
+## 6.1) Decisions log (curated)
+- Scope sequencing: start implementation with Epic A and keep the game runnable at each step.
+- Placeholder-first content policy: simple polygons/boxes are acceptable until real art/splats are integrated.
+- Version/toolchain baseline: Bevy 0.17 + `bevy_gaussian_splatting` v6, stable Rust (`rustc/cargo 1.88.0`).
+- Splat compatibility strategy: use a vendored patch-crate approach so Gaussian splats work on stable builds.
+- Config architecture: core gameplay parameters are data-driven through `config/*.toml` with fail-fast cross-reference validation.
+- Runtime iteration workflow: `F5` hot-reloads config safely; invalid reloads are rejected without corrupting runtime state.
+- Controls baseline: keyboard `A/D` and `Left/Right` for brake/accel and in-air rotation.
+- Debug UX baseline: keybind help is hidden by default and toggled with `H`.
+- Live tuning workflow:
+  - `V` vehicle tuning panel edits runtime values immediately.
+  - `Apply` persists vehicle tuning back to `config/vehicles.toml`.
+  - player is invulnerable while vehicle tuning panel is open.
+- Background tuning workflow:
+  - `B` background tuning panel edits parallax/offset/scale/loop length and terrain `ground_lowering_m` live.
+  - `Apply` persists background values to `config/backgrounds.toml` and terrain lowering to `config/game.toml`.
+- Units policy: gameplay, physics, HUD, and config use meters directly (no separate world-unit conversion layer).
+- Physics direction: `bevy_rapier2d` is the runtime backend for player/enemy dynamics.
+- Vehicle roadmap decision: Epic B+ introduces modular vehicle parts (chassis/turret/wheels), suspension, drivetrain tuning, and 3D model integration.
+- Drivetrain/control decisions:
+  - configurable front/rear drive split (default 30/70).
+  - airborne A/D control uses direct angular velocity target (`air_max_rotation_speed`) instead of torque.
+- Ground pipeline decision: move formal ground authoring/import workflow to end of Epic E.
+- Terrain representation decision:
+  - replaced jagged tower ground with spline-strip terrain.
+  - render continuous strip + curtain meshes; physics uses strip-top segment colliders.
+- Combat readability decisions:
+  - always render blue target line + green cone boundaries.
+  - target cone defaults to 60 degrees and remains configurable/upgradable.
+- Commentary design decision:
+  - gameplay emits dry factual events; style/color comes from LLM output.
+  - two commentators speak in round-robin.
+  - each prompt includes the other commentator's previous line.
+  - subtitles are always shown and color-coded by speaker.
+- Commentary integration strategy:
+  - build/use stub pipeline first.
+  - real Neocortex path uses chat first, then audio generation.
+  - per-commentator character ID + persistent session ID contexts.
+  - strict fallback path ensures gameplay never blocks on API failures.
+  - `commentator.toml` has `api_enabled` switch for cost control.
+- Prompt policy:
+  - removed rigid `OUTPUT_RULES` boilerplate.
+  - style is controlled per commentator in config.
+- Audio robustness decision: support Neocortex WAV playback with header normalization for non-standard RIFF/data sizes.
+- Run flow decisions:
+  - HP zero transitions to `Results`.
+  - scoring uses distance + kills + stunts + bonuses from TOML.
+  - upgrade offers trigger by coin milestones and pause gameplay for selection.
+- Upgrade UX decision: offer two random choices, selected with left/right controls, requiring a fresh keypress after panel opens.
+- Stability policy:
+  - prefer disjoint queries/`Without`/combined-query patterns to avoid Bevy `B0001` conflicts.
+  - use `try_despawn()` for resilience against duplicate-despawn command races.
+- Rendering/dev policy:
+  - run Gaussian-splat feature checks only when changes touch splat/rendering integration.
+  - loading state should wait for critical assets to load before entering `InRun`.
+  - isolate splat background rendering on a dedicated render layer to prevent gameplay meshes (for example 3D vehicle model) from being rendered by the splat camera.
+  - keep a dedicated gameplay `Camera3d` for vehicle models, synchronized to the main `Camera2d`, so 3D gameplay meshes remain visible after splat-layer isolation.
+  - render-order policy: keep the vehicle-model camera order above the 2D gameplay camera so the mesh cannot be occluded by the 2D pass.
+  - `bevy_gaussian_splatting` sort system expects non-negative camera order; do not use negative `Camera::order` on Gaussian cameras.
+- Maintenance decisions:
+  - keep C6 SFX placeholders deferred for now.
+  - split oversized files during follow-up refactors (`vehicle` and `commentary_stub` are both past the preferred size threshold).
+  - completed first `vehicle` split pass: `src/gameplay/vehicle/mod.rs` now coordinates constants/types/plugin only; systems moved into `scene.rs`, `model.rs`, `runtime.rs`, and `terrain.rs`.
+- BR5 status decision: 3D vehicle integration is active.
+- BR5 current workflow:
+  - active model is `assets/models/vehicles/car_rally.glb#Scene0`.
+  - `N` dumps loaded scene node names/transforms for mapping.
+  - runtime fit derives orientation/scale from wheel/chassis/turret geometry as iterative bootstrap.
+  - keep physics-synced wheel-pair overlays visible with imported model until wheel-node pivot rigging is implemented, so suspension travel remains readable.
+  - during alignment phase, keep placeholder chassis/turret visible and drive turret/wheel visual motion from gameplay state for side-by-side validation.
+  - wheel/turret node animation uses local-pivot compensation (instead of origin-only rotation) and wheel visual size is derived from measured wheel mesh bounds toward physics tire radius.
+  - when applying wheel scale overrides, preserve base pivot world position (base-scale -> target-scale compensation) to avoid wheel orbiting/offset drift.
+  - wheel-node runtime placement now pins each wheel pivot to the corresponding wheel-pair (physics visual proxy) world position each frame for exact suspension/position tracking.
+- Enemy model visual-fit pass:
+  - hooked `owl_tower.glb` and `owl_bomber.glb` via `assets.toml` model entries.
+  - enemy model setup now uses a simplified bounds fit (auto scale + center offset) against existing gameplay body size, keeping collider/hitbox logic unchanged.
 
 ---
+
 ## 7) Recommended build sequence (milestones)
 This is a suggested order that keeps "always playable":
 
@@ -698,5 +630,6 @@ Use `commentator.toml` to:
 ---
 
 *This plan is intentionally "cuttable": if something threatens stability, drop Web epic, drop missiles, drop boss phases, keep the core drive+shoot loop and the AI commentator shining.*
+
 
 

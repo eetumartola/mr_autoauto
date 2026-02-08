@@ -6,7 +6,7 @@ color = [
 ]
 id = "museum_hall_01"
 loop_length_m = 0.0
-offset_x_m = 150.0
+offset_x_m = 250.0
 offset_y_m = -30.0
 offset_z_m = 150.0
 parallax = 0.5

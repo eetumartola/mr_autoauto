@@ -1,8 +1,10 @@
+use crate::assets::{AssetRegistry, ModelAssetEntry};
 use crate::config::{EnemyTypeConfig, GameConfig, WeaponConfig};
 use crate::debug::{DebugGameplayGuards, EnemyDebugMarker};
 use crate::gameplay::combat::EnemyKilledEvent;
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
+use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::collections::HashSet;
@@ -42,6 +44,7 @@ const MIN_ENEMY_FIRE_RATE_HZ: f32 = 0.05;
 const MIN_ENEMY_FIRE_COOLDOWN_S: f32 = 0.12;
 const ENEMY_MASS_PER_RADIUS_SQUARED: f32 = 18.0;
 const ENEMY_MIN_MASS: f32 = 2.4;
+const ENEMY_MODEL_LOCAL_Z_M: f32 = 0.24;
 
 pub struct EnemyGameplayPlugin;
 
@@ -60,6 +63,7 @@ impl Plugin for EnemyGameplayPlugin {
                 Update,
                 (
                     spawn_bootstrap_enemies,
+                    configure_enemy_model_visuals,
                     update_enemy_behaviors,
                     fire_enemy_projectiles,
                     simulate_enemy_projectiles,
@@ -101,6 +105,28 @@ pub struct EnemyHitFlash {
 
 #[derive(Component, Debug, Clone, Copy)]
 struct EnemyBaseColor(pub Color);
+
+#[derive(Component, Debug, Clone, Copy)]
+struct EnemyModelVisualActive;
+
+#[derive(Component, Debug, Clone)]
+struct EnemyModelScene {
+    owner: Entity,
+    model_id: String,
+    scene_path: String,
+    desired_size: Vec2,
+}
+
+#[derive(Component, Debug, Clone, Copy, Default)]
+struct EnemyModelRuntime {
+    configured: bool,
+}
+
+#[derive(Debug, Clone)]
+struct EnemyModelSceneSpawn {
+    handle: Handle<Scene>,
+    metadata: EnemyModelScene,
+}
 
 #[derive(Component, Debug, Clone, Copy)]
 struct EnemyHpBarBackground {
@@ -222,6 +248,7 @@ fn cleanup_enemy_run_entities(
 fn spawn_bootstrap_enemies(
     mut commands: Commands,
     config: Res<GameConfig>,
+    asset_registry: Option<Res<AssetRegistry>>,
     mut bootstrap: ResMut<EnemyBootstrapState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
 ) {
@@ -244,6 +271,7 @@ fn spawn_bootstrap_enemies(
         spawn_enemy_instance(
             &mut commands,
             &config,
+            asset_registry.as_deref(),
             enemy_cfg,
             spawn_x,
             bootstrap.wave_counter + index as u32,
@@ -259,6 +287,7 @@ fn spawn_bootstrap_enemies(
 fn spawn_enemy_instance(
     commands: &mut Commands,
     config: &GameConfig,
+    asset_registry: Option<&AssetRegistry>,
     enemy_cfg: &EnemyTypeConfig,
     spawn_x: f32,
     sequence: u32,
@@ -345,7 +374,31 @@ fn spawn_enemy_instance(
         ))
         .id();
 
+    let model_scene = asset_registry
+        .and_then(|registry| resolve_enemy_model_entry(registry, &enemy_cfg.id, behavior_kind))
+        .and_then(|(model_id, model_entry)| {
+            model_entry.handle.as_ref().map(|handle| EnemyModelSceneSpawn {
+                handle: handle.clone(),
+                metadata: EnemyModelScene {
+                    owner: enemy_entity,
+                    model_id,
+                    scene_path: model_entry.scene_path.clone(),
+                    desired_size: body_size,
+                },
+            })
+        });
+
     commands.entity(enemy_entity).with_children(|parent| {
+        if let Some(model_scene) = &model_scene {
+            parent.spawn((
+                Name::new("EnemyModelScene"),
+                model_scene.metadata.clone(),
+                EnemyModelRuntime::default(),
+                SceneRoot(model_scene.handle.clone()),
+                Transform::from_xyz(0.0, 0.0, ENEMY_MODEL_LOCAL_Z_M),
+            ));
+        }
+
         parent.spawn((
             Name::new("EnemyHpBarBackground"),
             EnemyHpBarBackground {
@@ -373,6 +426,98 @@ fn spawn_enemy_instance(
             Visibility::Hidden,
         ));
     });
+}
+
+#[allow(clippy::type_complexity)]
+fn configure_enemy_model_visuals(
+    mut commands: Commands,
+    meshes: Res<Assets<Mesh>>,
+    mut scene_query: Query<
+        (
+            Entity,
+            &EnemyModelScene,
+            &mut EnemyModelRuntime,
+            &mut Transform,
+            &GlobalTransform,
+        ),
+    >,
+    children_query: Query<&Children>,
+    mesh_node_query: Query<(&Mesh3d, &GlobalTransform), Without<EnemyModelScene>>,
+    mut enemy_sprite_query: Query<&mut Sprite, With<Enemy>>,
+) {
+    for (scene_entity, model, mut runtime, mut scene_transform, scene_global) in &mut scene_query {
+        if runtime.configured {
+            continue;
+        }
+
+        let mut descendants = Vec::new();
+        collect_descendants(scene_entity, &children_query, &mut descendants);
+        if descendants.is_empty() {
+            continue;
+        }
+
+        let scene_inverse = scene_global.affine().inverse();
+        let mut local_min = Vec3::splat(f32::INFINITY);
+        let mut local_max = Vec3::splat(f32::NEG_INFINITY);
+        let mut mesh_count = 0usize;
+
+        for descendant in descendants {
+            let Ok((mesh3d, node_global)) = mesh_node_query.get(descendant) else {
+                continue;
+            };
+            let Some(mesh) = meshes.get(&mesh3d.0) else {
+                continue;
+            };
+            let Some((mesh_min, mesh_max)) = mesh_local_bounds(mesh) else {
+                continue;
+            };
+            mesh_count += 1;
+
+            for corner in aabb_corners(mesh_min, mesh_max) {
+                let world_point = node_global.affine().transform_point3(corner);
+                let root_local = scene_inverse.transform_point3(world_point);
+                local_min = local_min.min(root_local);
+                local_max = local_max.max(root_local);
+            }
+        }
+
+        if mesh_count == 0 || !local_min.is_finite() || !local_max.is_finite() {
+            continue;
+        }
+
+        let source_size = local_max - local_min;
+        let target_size = model.desired_size.max(Vec2::splat(0.05));
+        let scale_x = target_size.x / source_size.x.max(0.001);
+        let scale_y = target_size.y / source_size.y.max(0.001);
+        let uniform_scale = scale_x.min(scale_y).clamp(0.01, 500.0);
+
+        let source_center = (local_min + local_max) * 0.5;
+        scene_transform.scale = Vec3::splat(uniform_scale);
+        scene_transform.translation = Vec3::new(
+            -source_center.x * uniform_scale,
+            -source_center.y * uniform_scale,
+            ENEMY_MODEL_LOCAL_Z_M,
+        );
+        runtime.configured = true;
+
+        commands.entity(model.owner).insert(EnemyModelVisualActive);
+        if let Ok(mut sprite) = enemy_sprite_query.get_mut(model.owner) {
+            sprite.color = sprite.color.with_alpha(0.0);
+        }
+
+        info!(
+            "Enemy model setup: enemy=`{}` model=`{}` scene=`{}` fitted size=({:.3}, {:.3}) source=({:.3}, {:.3}, {:.3}) scale={:.3}",
+            model.owner.index(),
+            model.model_id,
+            model.scene_path,
+            target_size.x,
+            target_size.y,
+            source_size.x,
+            source_size.y,
+            source_size.z,
+            uniform_scale
+        );
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -896,6 +1041,7 @@ fn next_signed_unit_random(seed: &mut u64) -> f32 {
     (value * 2.0) - 1.0
 }
 
+#[allow(clippy::type_complexity)]
 fn update_enemy_hit_flash_effects(
     mut commands: Commands,
     time: Res<Time>,
@@ -906,7 +1052,7 @@ fn update_enemy_hit_flash_effects(
             &mut Sprite,
             Option<&mut EnemyHitFlash>,
         ),
-        With<Enemy>,
+        (With<Enemy>, Without<EnemyModelVisualActive>),
     >,
 ) {
     let dt = time.delta_secs();
@@ -1008,9 +1154,87 @@ fn behavior_kind_from_config(raw: &str) -> EnemyBehaviorKind {
     }
 }
 
+fn resolve_enemy_model_entry<'a>(
+    registry: &'a AssetRegistry,
+    enemy_type_id: &str,
+    behavior_kind: EnemyBehaviorKind,
+) -> Option<(String, &'a ModelAssetEntry)> {
+    let specific_id = format!("enemy_{enemy_type_id}");
+    if let Some(entry) = registry.models.get(&specific_id) {
+        return Some((specific_id, entry));
+    }
+
+    let behavior_id = match behavior_kind {
+        EnemyBehaviorKind::Turret => Some("enemy_turret_model"),
+        EnemyBehaviorKind::Bomber => Some("enemy_bomber_model"),
+        _ => None,
+    }?;
+    registry
+        .models
+        .get(behavior_id)
+        .map(|entry| (behavior_id.to_string(), entry))
+}
+
+fn collect_descendants(root: Entity, children_query: &Query<&Children>, out: &mut Vec<Entity>) {
+    let mut stack = vec![root];
+    while let Some(entity) = stack.pop() {
+        let Ok(children) = children_query.get(entity) else {
+            continue;
+        };
+        for child in children.iter() {
+            out.push(child);
+            stack.push(child);
+        }
+    }
+}
+
+fn mesh_local_bounds(mesh: &Mesh) -> Option<(Vec3, Vec3)> {
+    let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION)?;
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+
+    match positions {
+        VertexAttributeValues::Float32x3(values) => {
+            for [x, y, z] in values {
+                let point = Vec3::new(*x, *y, *z);
+                min = min.min(point);
+                max = max.max(point);
+            }
+        }
+        VertexAttributeValues::Float32x4(values) => {
+            for [x, y, z, _w] in values {
+                let point = Vec3::new(*x, *y, *z);
+                min = min.min(point);
+                max = max.max(point);
+            }
+        }
+        _ => return None,
+    }
+
+    if min.x.is_finite() && min.y.is_finite() && min.z.is_finite() {
+        Some((min, max))
+    } else {
+        None
+    }
+}
+
+fn aabb_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
+    [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(max.x, max.y, max.z),
+    ]
+}
+
 fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
     let terrain = &config.game.terrain;
     terrain.base_height
+        - terrain.ground_lowering_m
         + (x * terrain.ramp_slope)
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude
