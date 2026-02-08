@@ -89,6 +89,10 @@ cargo clippy --all-targets --all-features
 cargo test
 ```
 
+## License
+
+MIT (see `LICENSE`).
+
 ## Credits
 
 Includes SFX samples from zangrutz, hykenfreak, qubodup, kenny1007, sieuamthanh, madpancake, poundsounduk and debsound. Music from zagi2.

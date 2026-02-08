@@ -4,11 +4,15 @@ use crate::debug::{DebugGameplayGuards, EnemyDebugMarker};
 use crate::gameplay::combat::EnemyKilledEvent;
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
+use bevy::asset::LoadState;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::collections::HashSet;
 use std::f32::consts::{FRAC_PI_2, TAU};
+
+#[cfg(feature = "gaussian_splats")]
+use bevy_gaussian_splatting::PlanarGaussian3d;
 
 const ENEMY_SPAWN_START_AHEAD_M: f32 = 32.0;
 const ENEMY_SPAWN_SPACING_M: f32 = 20.0;
@@ -64,9 +68,9 @@ const ENEMY_CHARGER_GROUND_FOLLOW_RATE: f32 = 20.0;
 const SEGMENT_BOSS_TRIGGER_BEFORE_END_M: f32 = 20.0;
 const SEGMENT_BOSS_ENEMY_ID: &str = "segment_boss_drone";
 const SEGMENT_BOSS_ENTRY_OFFSET_M: f32 = 6.0;
-const BOSS_RIGHT_HALF_MIN_AHEAD_M: f32 = 24.0;
-const BOSS_RIGHT_HALF_MAX_AHEAD_M: f32 = 108.0;
-const BOSS_RIGHT_HALF_TARGET_AHEAD_M: f32 = 66.0;
+const SEGMENT_BOSS_PLAYER_GATE_GAP_M: f32 = 1.4;
+const SEGMENT_PORTAL_LOADING_LOGO_PATH: &str = "sprites/autoauto_logo.jpg";
+const SEGMENT_PORTAL_LOADING_MIN_SECONDS: f64 = 0.35;
 const BOSS_STRAFE_AMPLITUDE_M: f32 = 16.0;
 const BOSS_STRAFE_FREQUENCY_HZ: f32 = 0.11;
 const BOSS_HOVER_FREQUENCY_HZ: f32 = 0.16;
@@ -81,6 +85,7 @@ impl Plugin for EnemyGameplayPlugin {
         app.init_resource::<EnemyBootstrapState>()
             .init_resource::<EnemyContactTracker>()
             .init_resource::<SegmentBossEncounterState>()
+            .init_resource::<SegmentPortalTransitionState>()
             .add_message::<PlayerDamageEvent>()
             .add_message::<PlayerEnemyCrashEvent>()
             .add_message::<EnemyProjectileImpactEvent>()
@@ -90,6 +95,7 @@ impl Plugin for EnemyGameplayPlugin {
                     reset_enemy_bootstrap,
                     reset_enemy_contact_tracker,
                     reset_segment_boss_state,
+                    reset_segment_portal_transition_state,
                 ),
             )
             .add_systems(OnExit(GameState::InRun), cleanup_enemy_run_entities)
@@ -97,6 +103,7 @@ impl Plugin for EnemyGameplayPlugin {
                 Update,
                 (
                     sync_segment_boss_state,
+                    enforce_player_boss_gate,
                     trigger_segment_boss_encounter,
                     spawn_bootstrap_enemies,
                     configure_enemy_model_visuals,
@@ -106,6 +113,7 @@ impl Plugin for EnemyGameplayPlugin {
                     resolve_enemy_projectile_hits_player,
                     apply_enemy_contact_damage_to_player,
                     handle_segment_boss_defeat_transition,
+                    process_segment_portal_transition,
                     update_enemy_hit_flash_effects,
                     update_enemy_fade_out_fx,
                     update_enemy_health_bars,
@@ -270,6 +278,29 @@ impl Default for SegmentBossEncounterState {
     }
 }
 
+#[derive(Component)]
+struct SegmentPortalLoadingOverlay;
+
+#[derive(Debug, Clone)]
+struct PendingSegmentPortal {
+    previous_segment_id: String,
+    next_segment_index: usize,
+    next_segment_id: String,
+    next_segment_start_x: f32,
+    next_segment_end_x: f32,
+    target_x: f32,
+    previous_clearance_y: f32,
+    started_at_s: f64,
+    logo_handle: Handle<Image>,
+    #[cfg(feature = "gaussian_splats")]
+    next_splat_handle: Option<Handle<PlanarGaussian3d>>,
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+struct SegmentPortalTransitionState {
+    pending: Option<PendingSegmentPortal>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayerDamageSource {
     ProjectileBullet,
@@ -323,6 +354,17 @@ fn reset_segment_boss_state(mut boss_state: ResMut<SegmentBossEncounterState>) {
     *boss_state = SegmentBossEncounterState::default();
 }
 
+fn reset_segment_portal_transition_state(
+    mut commands: Commands,
+    mut portal_state: ResMut<SegmentPortalTransitionState>,
+    overlay_query: Query<Entity, With<SegmentPortalLoadingOverlay>>,
+) {
+    portal_state.pending = None;
+    for entity in &overlay_query {
+        commands.entity(entity).try_despawn();
+    }
+}
+
 fn sync_segment_boss_state(
     config: Res<GameConfig>,
     mut boss_state: ResMut<SegmentBossEncounterState>,
@@ -352,6 +394,42 @@ fn sync_segment_boss_state(
         boss_state.active_segment_end_x = segment_bounds.end_x;
         boss_state.boss_trigger_x =
             (segment_bounds.end_x - SEGMENT_BOSS_TRIGGER_BEFORE_END_M).max(segment_bounds.start_x);
+    }
+}
+
+fn enforce_player_boss_gate(
+    boss_state: Res<SegmentBossEncounterState>,
+    portal_state: Res<SegmentPortalTransitionState>,
+    mut player_query: Query<
+        (
+            &mut Transform,
+            Option<&mut Velocity>,
+            Option<&mut ExternalForce>,
+        ),
+        With<PlayerVehicle>,
+    >,
+) {
+    if !boss_state.boss_alive && portal_state.pending.is_none() {
+        return;
+    }
+
+    let Ok((mut player_transform, player_velocity, player_force)) = player_query.single_mut()
+    else {
+        return;
+    };
+
+    let gate_x = (boss_state.boss_trigger_x - SEGMENT_BOSS_PLAYER_GATE_GAP_M)
+        .max(boss_state.active_segment_start_x);
+    if player_transform.translation.x <= gate_x {
+        return;
+    }
+
+    player_transform.translation.x = gate_x;
+    if let Some(mut velocity) = player_velocity {
+        velocity.linvel.x = velocity.linvel.x.min(0.0);
+    }
+    if let Some(mut force) = player_force {
+        force.force.x = force.force.x.min(0.0);
     }
 }
 
@@ -427,6 +505,7 @@ fn cleanup_enemy_run_entities(
             With<EnemyFadeOutFx>,
             With<EnemyHpBarBackground>,
             With<EnemyHpBarFill>,
+            With<SegmentPortalLoadingOverlay>,
         )>,
     >,
 ) {
@@ -443,7 +522,7 @@ fn spawn_bootstrap_enemies(
     boss_state: Res<SegmentBossEncounterState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
 ) {
-    if bootstrap.seeded || boss_state.boss_alive {
+    if bootstrap.seeded || boss_state.boss_alive || boss_state.boss_spawned_for_segment {
         return;
     }
 
@@ -829,20 +908,18 @@ fn update_enemy_behaviors(
                 desired_velocity.y = (target_y - enemy_position.y) * 4.0;
             }
             EnemyBehaviorKind::Boss => {
-                if transform.translation.x < boss_state.boss_trigger_x {
-                    transform.translation.x = boss_state.boss_trigger_x;
-                    velocity.linvel.x = velocity.linvel.x.max(0.0);
+                let anchor_x = boss_state.boss_trigger_x;
+                if transform.translation.x > anchor_x {
+                    transform.translation.x = anchor_x;
+                    velocity.linvel.x = velocity.linvel.x.min(0.0);
                 }
-                let right_half_min_x =
-                    (player_x + BOSS_RIGHT_HALF_MIN_AHEAD_M).max(boss_state.boss_trigger_x);
-                let right_half_max_x =
-                    (player_x + BOSS_RIGHT_HALF_MAX_AHEAD_M).max(right_half_min_x);
-                let strafe = ((behavior.elapsed_s * BOSS_STRAFE_FREQUENCY_HZ * TAU)
+
+                let strafe_left = ((behavior.elapsed_s * BOSS_STRAFE_FREQUENCY_HZ * TAU)
                     + behavior.phase_offset_rad)
                     .sin()
+                    .abs()
                     * BOSS_STRAFE_AMPLITUDE_M;
-                let target_x = (player_x + BOSS_RIGHT_HALF_TARGET_AHEAD_M + strafe)
-                    .clamp(right_half_min_x, right_half_max_x);
+                let target_x = anchor_x - strafe_left;
                 desired_velocity.x = (target_x - enemy_position.x) * BOSS_TRACK_X_GAIN;
 
                 let hover = ((behavior.elapsed_s * BOSS_HOVER_FREQUENCY_HZ * TAU)
@@ -1278,9 +1355,12 @@ fn apply_enemy_contact_damage_to_player(
 fn handle_segment_boss_defeat_transition(
     mut commands: Commands,
     config: Res<GameConfig>,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
     mut kill_events: MessageReader<EnemyKilledEvent>,
     mut bootstrap: ResMut<EnemyBootstrapState>,
     mut boss_state: ResMut<SegmentBossEncounterState>,
+    mut portal_state: ResMut<SegmentPortalTransitionState>,
     mut player_query: Query<
         (
             &mut Transform,
@@ -1292,7 +1372,7 @@ fn handle_segment_boss_defeat_transition(
     enemy_query: Query<Entity, With<Enemy>>,
     enemy_projectile_query: Query<Entity, With<EnemyProjectile>>,
 ) {
-    if !boss_state.boss_alive {
+    if !boss_state.boss_alive || portal_state.pending.is_some() {
         return;
     }
 
@@ -1322,8 +1402,7 @@ fn handle_segment_boss_defeat_transition(
         return;
     };
 
-    let Ok((mut player_transform, player_velocity, player_external_force)) =
-        player_query.single_mut()
+    let Ok((player_transform, player_velocity, player_external_force)) = player_query.single_mut()
     else {
         return;
     };
@@ -1331,10 +1410,6 @@ fn handle_segment_boss_defeat_transition(
     let previous_ground_y = terrain_height_at_x(&config, previous_x);
     let previous_clearance = (player_transform.translation.y - previous_ground_y).clamp(2.4, 16.0);
     let target_x = next_segment_start_x + SEGMENT_BOSS_ENTRY_OFFSET_M;
-    let target_ground_y = terrain_height_at_x(&config, target_x);
-    player_transform.translation.x = target_x;
-    player_transform.translation.y = target_ground_y + previous_clearance;
-    player_transform.rotation = Quat::IDENTITY;
 
     if let Some(mut velocity) = player_velocity {
         velocity.linvel = Vec2::ZERO;
@@ -1353,18 +1428,147 @@ fn handle_segment_boss_defeat_transition(
     }
 
     bootstrap.seeded = false;
-    boss_state.active_segment_index = next_segment_bounds.index;
-    boss_state.active_segment_id = next_segment_bounds.id.to_string();
-    boss_state.active_segment_start_x = next_segment_bounds.start_x;
-    boss_state.active_segment_end_x = next_segment_bounds.end_x;
-    boss_state.boss_trigger_x = (next_segment_bounds.end_x - SEGMENT_BOSS_TRIGGER_BEFORE_END_M)
-        .max(next_segment_bounds.start_x);
+    boss_state.boss_spawned_for_segment = true;
+    boss_state.boss_alive = false;
+
+    let logo_handle = asset_server.load(SEGMENT_PORTAL_LOADING_LOGO_PATH);
+    commands.spawn((
+        Name::new("SegmentPortalLoadingOverlay"),
+        SegmentPortalLoadingOverlay,
+        Sprite::from_image(logo_handle.clone()),
+        Transform::from_xyz(0.0, 0.0, 300.0),
+    ));
+
+    #[cfg(feature = "gaussian_splats")]
+    let next_splat_handle = config
+        .backgrounds_by_id
+        .get(next_segment_bounds.id)
+        .and_then(|background| background.splat_asset_id.as_deref())
+        .and_then(|splat_id| config.splat_assets_by_id.get(splat_id))
+        .map(|splat_cfg| asset_server.load::<PlanarGaussian3d>(splat_cfg.path.clone()));
+
+    portal_state.pending = Some(PendingSegmentPortal {
+        previous_segment_id: previous_segment_id.clone(),
+        next_segment_index: next_segment_bounds.index,
+        next_segment_id: next_segment_bounds.id.to_string(),
+        next_segment_start_x,
+        next_segment_end_x: next_segment_bounds.end_x,
+        target_x,
+        previous_clearance_y: previous_clearance,
+        started_at_s: time.elapsed_secs_f64(),
+        logo_handle,
+        #[cfg(feature = "gaussian_splats")]
+        next_splat_handle,
+    });
+
+    info!(
+        "Boss defeated in segment `{}`; queued portal transition to segment `{}` at x={:.1}.",
+        previous_segment_id, next_segment_bounds.id, target_x
+    );
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn process_segment_portal_transition(
+    mut commands: Commands,
+    time: Res<Time>,
+    config: Res<GameConfig>,
+    asset_server: Res<AssetServer>,
+    mut bootstrap: ResMut<EnemyBootstrapState>,
+    mut boss_state: ResMut<SegmentBossEncounterState>,
+    mut portal_state: ResMut<SegmentPortalTransitionState>,
+    mut player_query: Query<
+        (
+            &mut Transform,
+            Option<&mut Velocity>,
+            Option<&mut ExternalForce>,
+        ),
+        With<PlayerVehicle>,
+    >,
+    overlay_query: Query<Entity, With<SegmentPortalLoadingOverlay>>,
+) {
+    let Some(pending) = portal_state.pending.as_ref() else {
+        return;
+    };
+
+    let Ok((mut player_transform, mut player_velocity, mut player_force)) =
+        player_query.single_mut()
+    else {
+        return;
+    };
+
+    if let Some(velocity) = &mut player_velocity {
+        velocity.linvel = Vec2::ZERO;
+        velocity.angvel = 0.0;
+    }
+    if let Some(force) = &mut player_force {
+        force.force = Vec2::ZERO;
+        force.torque = 0.0;
+    }
+
+    let min_time_elapsed =
+        (time.elapsed_secs_f64() - pending.started_at_s) >= SEGMENT_PORTAL_LOADING_MIN_SECONDS;
+    if !min_time_elapsed {
+        return;
+    }
+
+    let logo_loaded = asset_server.is_loaded_with_dependencies(pending.logo_handle.id());
+    let logo_failed = matches!(
+        asset_server.load_state(pending.logo_handle.id()),
+        LoadState::Failed(_)
+    );
+    if !logo_loaded && !logo_failed {
+        return;
+    }
+
+    #[cfg(feature = "gaussian_splats")]
+    {
+        if let Some(next_splat_handle) = pending.next_splat_handle.as_ref() {
+            let splat_loaded = asset_server.is_loaded_with_dependencies(next_splat_handle.id());
+            let splat_failed = matches!(
+                asset_server.load_state(next_splat_handle.id()),
+                LoadState::Failed(_)
+            );
+            if !splat_loaded && !splat_failed {
+                return;
+            }
+        }
+    }
+
+    let Some(pending) = portal_state.pending.take() else {
+        return;
+    };
+
+    let target_ground_y = terrain_height_at_x(&config, pending.target_x);
+    player_transform.translation.x = pending.target_x;
+    player_transform.translation.y = target_ground_y + pending.previous_clearance_y;
+    player_transform.rotation = Quat::IDENTITY;
+
+    if let Some(velocity) = &mut player_velocity {
+        velocity.linvel = Vec2::ZERO;
+        velocity.angvel = 0.0;
+    }
+    if let Some(force) = &mut player_force {
+        force.force = Vec2::ZERO;
+        force.torque = 0.0;
+    }
+
+    bootstrap.seeded = false;
+    boss_state.active_segment_index = pending.next_segment_index;
+    boss_state.active_segment_id = pending.next_segment_id.clone();
+    boss_state.active_segment_start_x = pending.next_segment_start_x;
+    boss_state.active_segment_end_x = pending.next_segment_end_x;
+    boss_state.boss_trigger_x = (pending.next_segment_end_x - SEGMENT_BOSS_TRIGGER_BEFORE_END_M)
+        .max(pending.next_segment_start_x);
     boss_state.boss_spawned_for_segment = false;
     boss_state.boss_alive = false;
 
+    for entity in &overlay_query {
+        commands.entity(entity).try_despawn();
+    }
+
     info!(
-        "Boss defeated in segment `{}`; transitioning to segment `{}` at x={:.1}.",
-        previous_segment_id, boss_state.active_segment_id, target_x
+        "Boss portal completed: segment `{}` -> `{}` at x={:.1}.",
+        pending.previous_segment_id, pending.next_segment_id, pending.target_x
     );
 }
 

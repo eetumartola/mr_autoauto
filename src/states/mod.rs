@@ -164,6 +164,7 @@ fn cleanup_loading_screen(
 fn loading_to_in_run(
     time: Res<Time>,
     asset_server: Res<AssetServer>,
+    config: Res<GameConfig>,
     registry: Option<Res<AssetRegistry>>,
     loading_state: Option<Res<LoadingScreenState>>,
     mut next_state: ResMut<NextState<GameState>>,
@@ -201,6 +202,29 @@ fn loading_to_in_run(
         .all(|handle| asset_loaded_or_failed(&asset_server, handle))
     {
         return;
+    }
+
+    #[cfg(feature = "gaussian_splats")]
+    {
+        if let Some(first_segment) = config.segments.segment_sequence.first() {
+            if let Some(background) = config.backgrounds_by_id.get(&first_segment.id) {
+                if let Some(splat_id) = background.splat_asset_id.as_deref() {
+                    if let Some(splat_asset) = config.splat_assets_by_id.get(splat_id) {
+                        let start_handle: Handle<PlanarGaussian3d> =
+                            asset_server.load(splat_asset.path.clone());
+                        let start_loaded =
+                            asset_server.is_loaded_with_dependencies(start_handle.id());
+                        let start_failed = matches!(
+                            asset_server.load_state(start_handle.id()),
+                            LoadState::Failed(_)
+                        );
+                        if !start_loaded && !start_failed {
+                            return;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if logo_failed {
@@ -589,7 +613,7 @@ fn results_controls(
     mut exit: MessageWriter<AppExit>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
-        next_state.set(GameState::Loading);
+        next_state.set(GameState::Boot);
     }
 
     if keyboard.just_pressed(KeyCode::KeyQ) {

@@ -496,7 +496,10 @@ environment = "ice"
 - Segment pacing decision:
   - segment lengths set to `castle=512m`, `mythical=1024m`.
   - boss encounter triggers 20m before segment end.
+  - while the segment boss is alive (or portal is pending), player progression is gated at the boss line so the run stays in the current segment.
   - defeating the boss advances/teleports run to the next segment start.
+- Segment portal loading decision:
+  - boss defeat now opens a loading overlay and waits for the next segment background asset readiness before completing the portal.
 - Boss camera gate decision:
   - while a segment boss is alive, gameplay camera x is clamped to not pan past the boss.
 - Restart flow decision:
@@ -510,6 +513,8 @@ environment = "ice"
   - isolate splat background rendering on a dedicated render layer to prevent gameplay meshes (for example 3D vehicle model) from being rendered by the splat camera.
   - keep a dedicated gameplay `Camera3d` for vehicle models, synchronized to the main `Camera2d`, so 3D gameplay meshes remain visible after splat-layer isolation.
   - `bevy_gaussian_splatting` sort system expects non-negative camera order; do not use negative `Camera::order` on Gaussian cameras.
+  - on Windows, default WGPU backend to DX12 (unless overridden via `WGPU_BACKEND`) to improve compatibility with external game-capture tools.
+  - lowered vendored Gaussian radix-sort shader workgroup pressure (4-bit digits) to avoid compute pipeline validation failures on adapters with `max_compute_invocations_per_workgroup < 1024` (for example 768).
 - Maintenance decisions:
   - split oversized files during follow-up refactors (`vehicle` and `commentary_stub` are both past the preferred size threshold).
   - completed first `vehicle` split pass: `src/gameplay/vehicle/mod.rs` now coordinates constants/types/plugin only; systems moved into `scene.rs`, `model.rs`, `runtime.rs`, and `terrain.rs`.

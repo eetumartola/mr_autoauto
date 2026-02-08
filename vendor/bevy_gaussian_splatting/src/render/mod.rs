@@ -649,8 +649,11 @@ impl ShaderDefines {
 
 impl Default for ShaderDefines {
     fn default() -> Self {
-        let radix_bits_per_digit = 8;
-        let radix_digit_places = 32 / radix_bits_per_digit;
+        // Keep radix sort workgroup size comfortably below low-end adapter limits.
+        // 8-bit digits => radix_base=256 and workgroup_invocations_a=256*4=1024, which can
+        // exceed some devices' max_compute_invocations_per_workgroup (for example 768).
+        let radix_bits_per_digit = 4;
+        let radix_digit_places = 32_u32.div_ceil(radix_bits_per_digit);
         let radix_base = 1 << radix_bits_per_digit;
         let entries_per_invocation_a = 4;
         let entries_per_invocation_c = 4;
