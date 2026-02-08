@@ -174,6 +174,7 @@ pub(super) fn apply_vehicle_kinematics(
     input_state: Res<VehicleInputState>,
     debug_guards: Option<Res<DebugGameplayGuards>>,
     rapier_context: ReadRapierContext,
+    mut landing_events: MessageWriter<VehicleLandingEvent>,
     mut player_query: Query<
         (
             Entity,
@@ -422,6 +423,13 @@ pub(super) fn apply_vehicle_kinematics(
         if !was_grounded && velocity.linvel.y < 0.0 {
             contact.just_landed = true;
             contact.landing_impact_speed_mps = -velocity.linvel.y;
+            let landing_crash =
+                contact.landing_impact_speed_mps >= CRASH_LANDING_SPEED_THRESHOLD_MPS;
+            landing_events.write(VehicleLandingEvent {
+                world_position: body_center,
+                impact_speed_mps: contact.landing_impact_speed_mps,
+                was_crash: landing_crash,
+            });
             let impact_over_threshold =
                 (contact.landing_impact_speed_mps - CRASH_LANDING_SPEED_THRESHOLD_MPS).max(0.0);
             if impact_over_threshold > 0.0 && !player_invulnerable {

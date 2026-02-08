@@ -278,16 +278,20 @@ fn spawn_debug_overlay(
 
     commands.spawn((
         DebugOverlayText,
-        Text::new("debug overlay initializing..."),
+        Text::new("debug diagnostics initializing..."),
         TextFont {
-            font_size: 16.0,
+            font_size: 14.0,
             ..default()
         },
-        TextColor(Color::srgb(0.92, 0.95, 0.97)),
+        TextColor(Color::srgb(0.88, 0.93, 0.97)),
+        BackgroundColor(Color::srgba(0.04, 0.06, 0.08, 0.72)),
+        BorderColor::all(Color::srgba(0.48, 0.58, 0.66, 0.85)),
         Node {
             position_type: PositionType::Absolute,
             left: Val::Px(12.0),
-            top: Val::Px(12.0),
+            bottom: Val::Px(12.0),
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
         ZIndex(100),
@@ -412,64 +416,35 @@ fn update_debug_overlay_text(
         .map(|state| (state.accelerate, state.brake))
         .unwrap_or((false, false));
 
-    let (
-        score,
-        kill_count,
-        coin_pickup_count,
-        health_pickup_count,
-        total_airtime_s,
-        total_wheelie_s,
-        big_jump_count,
-        huge_jump_count,
-    ) = match run_summary {
-        Some(summary) => (
-            summary.score,
-            summary.kill_count,
-            summary.coin_pickup_count,
-            summary.health_pickup_count,
-            summary.total_airtime_s,
-            summary.total_wheelie_s,
-            summary.big_jump_count,
-            summary.huge_jump_count,
-        ),
-        None => (0, 0, 0, 0, 0.0, 0.0, 0, 0),
+    let (score, kill_count, coin_pickup_count) = match run_summary {
+        Some(summary) => (summary.score, summary.kill_count, summary.coin_pickup_count),
+        None => (0, 0, 0),
     };
 
-    let (airtime_cur, airtime_best, wheelie_best, flip_count, crash_count, max_speed, last_impact) =
-        match stunts {
-            Some(stunts) => (
-                stunts.airtime_current_s,
-                stunts.airtime_best_s,
-                stunts.wheelie_best_s,
-                stunts.flip_count,
-                stunts.crash_count,
-                stunts.max_speed_mps,
-                stunts.last_landing_impact_speed_mps,
-            ),
-            None => (0.0, 0.0, 0.0, 0, 0, 0.0, 0.0),
-        };
+    let (airtime_cur, wheelie_cur, crash_count, max_speed, last_impact) = match stunts {
+        Some(stunts) => (
+            stunts.airtime_current_s,
+            stunts.wheelie_current_s,
+            stunts.crash_count,
+            stunts.max_speed_mps,
+            stunts.last_landing_impact_speed_mps,
+        ),
+        None => (0.0, 0.0, 0, 0.0, 0.0),
+    };
 
     *text = Text::new(format!(
-        "FPS: {fps:>5.1}\nDistance: {distance:>7.1}m | X: {player_x:>7.1}m\nSpeed: {speed:>6.1} m/s\nScore: {score} | Kills: {kills} | Coins: {coins} | Health Crates: {health_pickups}\nInput: accel={accel} brake={brake}\nGrounded: {grounded}\nAirtime: {air_cur:>4.2}s (best {air_best:>4.2}) | Total: {air_total:>5.2}s\nWheelie Best: {wheelie_best:>4.2}s | Total: {wheelie_total:>5.2}s\nFlips: {flips} | Crashes: {crashes} | Big/Huge Jumps: {big_jumps}/{huge_jumps}\nMax Speed: {max_speed:>6.1} m/s | Last Impact: {impact:>5.1} m/s\nCamera Pan Offset: {camera_pan_offset:>6.1} m\nActive Segment: {segment}\nEnemy Count: {enemy_count}\nHotkeys: H help | V vehicle tune | B background tune | O/P pan camera | N dump model | F5 reload config | J big jump | K kill | C crash",
-        distance = run_stats.distance_m,
+        "DBG FPS: {fps:>5.1}\nX: {player_x:>7.1} m | Pan: {camera_pan_offset:>6.1} m | Enemy: {enemy_count}\nInput: accel={accel} brake={brake} grounded={grounded}\nSpeed: {speed:>6.1} m/s | Score: {score} | Kills: {kills} | Coins: {coins}\nAir: {air_cur:>4.2}s | Wheelie: {wheelie_cur:>4.2}s | Crashes: {crashes}\nMax: {max_speed:>6.1} m/s | Impact: {impact:>5.1} m/s\nSegment: {segment}",
         player_x = player_x,
         speed = run_stats.speed_mps,
         score = score,
         kills = kill_count,
         coins = coin_pickup_count,
-        health_pickups = health_pickup_count,
         accel = if input_accel { "yes" } else { "no" },
         brake = if input_brake { "yes" } else { "no" },
         grounded = if run_stats.grounded { "yes" } else { "no" },
         air_cur = airtime_cur,
-        air_best = airtime_best,
-        air_total = total_airtime_s,
-        wheelie_best = wheelie_best,
-        wheelie_total = total_wheelie_s,
-        flips = flip_count,
+        wheelie_cur = wheelie_cur,
         crashes = crash_count,
-        big_jumps = big_jump_count,
-        huge_jumps = huge_jump_count,
         max_speed = max_speed,
         impact = last_impact,
         camera_pan_offset = camera_pan.offset_x_m,
@@ -1026,11 +1001,8 @@ fn background_tuning_panel_ui(
     }
 
     if apply_clicked {
-        match persist_background_and_terrain_tuning_and_reload(
-            &mut config,
-            &background_id,
-            &params,
-        ) {
+        match persist_background_and_terrain_tuning_and_reload(&mut config, &background_id, &params)
+        {
             Ok(message) => {
                 panel_state.status = message;
                 if let Err(error) =

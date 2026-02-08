@@ -1,5 +1,6 @@
 pub mod combat;
 pub mod enemies;
+pub mod feedback;
 pub mod pickups;
 pub mod upgrades;
 pub mod vehicle;
@@ -7,6 +8,7 @@ pub mod vehicle;
 use bevy::prelude::*;
 use combat::CombatGameplayPlugin;
 use enemies::EnemyGameplayPlugin;
+use feedback::FeedbackGameplayPlugin;
 use pickups::PickupGameplayPlugin;
 use upgrades::UpgradeGameplayPlugin;
 use vehicle::VehicleGameplayPlugin;
@@ -19,6 +21,7 @@ impl Plugin for GameplayPlugin {
             .add_plugins(EnemyGameplayPlugin)
             .add_plugins(PickupGameplayPlugin)
             .add_plugins(UpgradeGameplayPlugin)
-            .add_plugins(CombatGameplayPlugin);
+            .add_plugins(CombatGameplayPlugin)
+            .add_plugins(FeedbackGameplayPlugin);
     }
 }

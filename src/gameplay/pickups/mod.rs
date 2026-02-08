@@ -41,6 +41,7 @@ pub struct PickupCollectedEvent {
     pub kind: PickupKind,
     pub score_added: u32,
     pub health_restored: f32,
+    pub world_position: Vec2,
 }
 
 #[derive(Component, Debug, Clone, Copy)]
@@ -214,6 +215,7 @@ fn collect_pickups(
             kind: pickup.kind,
             score_added,
             health_restored,
+            world_position: pickup_position,
         });
         commands.entity(entity).try_despawn();
     }
@@ -325,8 +327,7 @@ fn next_unit_random(seed: &mut u64) -> f32 {
 
 fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
     let terrain = &config.game.terrain;
-    terrain.base_height
-        - terrain.ground_lowering_m
+    terrain.base_height - terrain.ground_lowering_m
         + (x * terrain.ramp_slope)
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude

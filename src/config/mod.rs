@@ -1250,6 +1250,10 @@ pub enum RunUpgradeEffectKind {
     HealthFlat,
     WeaponFireRatePercent,
     MissileFireRatePercent,
+    VehiclePowerPercent,
+    TurretConeDegreesFlat,
+    MissileTurnRatePercent,
+    TurretRangePercent,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1294,6 +1298,34 @@ fn default_run_upgrade_options() -> Vec<RunUpgradeOptionConfig> {
             id: "missile_fire_rate_plus_10_percent".to_string(),
             label: "Missile Fire Rate +10%".to_string(),
             effect: RunUpgradeEffectKind::MissileFireRatePercent,
+            value: 0.10,
+            max_stacks: 50,
+        },
+        RunUpgradeOptionConfig {
+            id: "vehicle_power_plus_10_percent".to_string(),
+            label: "Car Power +10%".to_string(),
+            effect: RunUpgradeEffectKind::VehiclePowerPercent,
+            value: 0.10,
+            max_stacks: 50,
+        },
+        RunUpgradeOptionConfig {
+            id: "turret_cone_plus_5_degrees".to_string(),
+            label: "Targeting Cone +5 deg".to_string(),
+            effect: RunUpgradeEffectKind::TurretConeDegreesFlat,
+            value: 5.0,
+            max_stacks: 30,
+        },
+        RunUpgradeOptionConfig {
+            id: "missile_turn_rate_plus_10_percent".to_string(),
+            label: "Missile Turn +10%".to_string(),
+            effect: RunUpgradeEffectKind::MissileTurnRatePercent,
+            value: 0.10,
+            max_stacks: 50,
+        },
+        RunUpgradeOptionConfig {
+            id: "turret_range_plus_10_percent".to_string(),
+            label: "Targeting Range +10%".to_string(),
+            effect: RunUpgradeEffectKind::TurretRangePercent,
             value: 0.10,
             max_stacks: 50,
         },

@@ -16,7 +16,7 @@ speed = 3.4
 contact_damage = 4.0
 kill_score = 35
 weapon_id = "enemy_pea_shooter"
-hitbox_radius = 0.45
+hitbox_radius = 0.585
 hover_amplitude = 1.8
 hover_frequency = 1.35
 
@@ -38,7 +38,7 @@ speed = 3.6
 contact_damage = 10.0
 kill_score = 50
 weapon_id = "enemy_pea_shooter"
-hitbox_radius = 0.60
+hitbox_radius = 0.78
 charge_speed_multiplier = 2.2
 
 [[enemy_types]]

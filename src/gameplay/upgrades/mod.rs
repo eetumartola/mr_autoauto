@@ -520,6 +520,125 @@ fn apply_upgrade_choice(
                 "missile fire interval -> {new_interval_seconds:.3}s"
             ))
         }
+        RunUpgradeEffectKind::VehiclePowerPercent => {
+            let scale = 1.0 + choice.value.max(0.0);
+            let default_vehicle_id = config.game.app.default_vehicle.clone();
+
+            let new_acceleration = {
+                let vehicle = config
+                    .vehicles_by_id
+                    .get_mut(&default_vehicle_id)
+                    .ok_or_else(|| {
+                        format!("default vehicle `{default_vehicle_id}` not found for upgrade")
+                    })?;
+                vehicle.acceleration = (vehicle.acceleration * scale).max(0.01);
+                vehicle.acceleration
+            };
+
+            if let Some(vehicle) = config
+                .vehicles
+                .vehicles
+                .iter_mut()
+                .find(|vehicle| vehicle.id == default_vehicle_id)
+            {
+                vehicle.acceleration = new_acceleration;
+            }
+
+            Ok(format!("acceleration -> {new_acceleration:.3}"))
+        }
+        RunUpgradeEffectKind::TurretConeDegreesFlat => {
+            let cone_delta = choice.value.max(0.0);
+            let default_vehicle_id = config.game.app.default_vehicle.clone();
+
+            let new_cone_degrees = {
+                let vehicle = config
+                    .vehicles_by_id
+                    .get_mut(&default_vehicle_id)
+                    .ok_or_else(|| {
+                        format!("default vehicle `{default_vehicle_id}` not found for upgrade")
+                    })?;
+                vehicle.turret_cone_degrees =
+                    (vehicle.turret_cone_degrees + cone_delta).clamp(1.0, 180.0);
+                vehicle.turret_cone_degrees
+            };
+
+            if let Some(vehicle) = config
+                .vehicles
+                .vehicles
+                .iter_mut()
+                .find(|vehicle| vehicle.id == default_vehicle_id)
+            {
+                vehicle.turret_cone_degrees = new_cone_degrees;
+            }
+
+            Ok(format!("turret cone -> {new_cone_degrees:.1} deg"))
+        }
+        RunUpgradeEffectKind::MissileTurnRatePercent => {
+            let scale = 1.0 + choice.value.max(0.0);
+            let default_vehicle_id = config.game.app.default_vehicle.clone();
+            let secondary_weapon_id = config
+                .vehicles_by_id
+                .get(&default_vehicle_id)
+                .ok_or_else(|| {
+                    format!("default vehicle `{default_vehicle_id}` not found for upgrade")
+                })?
+                .secondary_weapon_id
+                .clone()
+                .ok_or_else(|| {
+                    "default vehicle has no secondary weapon for missile turn upgrade".to_string()
+                })?;
+
+            let new_turn_rate_degrees = {
+                let weapon = config
+                    .weapons_by_id
+                    .get_mut(&secondary_weapon_id)
+                    .ok_or_else(|| {
+                        format!("secondary weapon `{secondary_weapon_id}` not found for upgrade")
+                    })?;
+                weapon.homing_turn_rate_degrees =
+                    (weapon.homing_turn_rate_degrees * scale).max(0.0);
+                weapon.homing_turn_rate_degrees
+            };
+
+            if let Some(weapon) = config
+                .weapons
+                .weapons
+                .iter_mut()
+                .find(|weapon| weapon.id == secondary_weapon_id)
+            {
+                weapon.homing_turn_rate_degrees = new_turn_rate_degrees;
+            }
+
+            Ok(format!(
+                "{secondary_weapon_id} turn rate -> {new_turn_rate_degrees:.3} deg/s"
+            ))
+        }
+        RunUpgradeEffectKind::TurretRangePercent => {
+            let scale = 1.0 + choice.value.max(0.0);
+            let default_vehicle_id = config.game.app.default_vehicle.clone();
+
+            let new_range_m = {
+                let vehicle = config
+                    .vehicles_by_id
+                    .get_mut(&default_vehicle_id)
+                    .ok_or_else(|| {
+                        format!("default vehicle `{default_vehicle_id}` not found for upgrade")
+                    })?;
+                vehicle.turret_range_m = (vehicle.turret_range_m * scale).max(0.1);
+                vehicle.turret_range_m
+            };
+
+            if let Some(vehicle) = config
+                .vehicles
+                .vehicles
+                .iter_mut()
+                .find(|vehicle| vehicle.id == default_vehicle_id)
+            {
+                vehicle.turret_range_m = new_range_m;
+            }
+
+            Ok(format!("turret range -> {new_range_m:.3} m"))
+        }
     }
 }
 
@@ -557,6 +676,18 @@ fn describe_effect(effect: RunUpgradeEffectKind, value: f32) -> String {
         }
         RunUpgradeEffectKind::MissileFireRatePercent => {
             format!("missile fire rate +{:.0}%", value.max(0.0) * 100.0)
+        }
+        RunUpgradeEffectKind::VehiclePowerPercent => {
+            format!("car power +{:.0}%", value.max(0.0) * 100.0)
+        }
+        RunUpgradeEffectKind::TurretConeDegreesFlat => {
+            format!("targeting cone +{:.1} deg", value.max(0.0))
+        }
+        RunUpgradeEffectKind::MissileTurnRatePercent => {
+            format!("missile turn speed +{:.0}%", value.max(0.0) * 100.0)
+        }
+        RunUpgradeEffectKind::TurretRangePercent => {
+            format!("targeting range +{:.0}%", value.max(0.0) * 100.0)
         }
     }
 }

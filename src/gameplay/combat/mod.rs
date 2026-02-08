@@ -26,6 +26,9 @@ const BULLET_TRAIL_SEGMENT_COUNT: usize = 7;
 const MISSILE_TRAIL_SEGMENT_COUNT: usize = 8;
 const BULLET_TRAIL_SEGMENT_LENGTH_M: f32 = 0.18;
 const MISSILE_TRAIL_SEGMENT_LENGTH_M: f32 = 0.24;
+const MUZZLE_FLASH_LIFETIME_S: f32 = 0.065;
+const BULLET_MUZZLE_FLASH_SIZE_M: Vec2 = Vec2::new(0.36, 0.22);
+const MISSILE_MUZZLE_FLASH_SIZE_M: Vec2 = Vec2::new(0.48, 0.28);
 const IMPACT_FX_SIZE_M: Vec2 = Vec2::new(0.52, 0.52);
 const IMPACT_FX_LIFETIME_S: f32 = 0.15;
 const EXPLOSION_FX_SIZE_M: Vec2 = Vec2::new(1.45, 1.45);
@@ -716,6 +719,18 @@ fn spawn_player_projectile(
     let muzzle_world = turret_origin_world + (player_rotation * muzzle_offset_local);
     let projectile_center = muzzle_world + (shot_direction_world * (projectile_length * 0.5));
     let shot_angle_world = shot_direction_world.y.atan2(shot_direction_world.x);
+    let muzzle_flash_size = match projectile_kind {
+        PlayerProjectileKind::Bullet => BULLET_MUZZLE_FLASH_SIZE_M,
+        PlayerProjectileKind::Missile => MISSILE_MUZZLE_FLASH_SIZE_M,
+    };
+    spawn_fade_out_fx(
+        commands,
+        "PlayerMuzzleFlashFx",
+        muzzle_world,
+        muzzle_flash_size,
+        projectile_color.with_alpha(0.9),
+        MUZZLE_FLASH_LIFETIME_S,
+    );
 
     let projectile_entity = commands
         .spawn((
@@ -820,8 +835,7 @@ fn spawn_fade_out_fx(
 
 fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
     let terrain = &config.game.terrain;
-    terrain.base_height
-        - terrain.ground_lowering_m
+    terrain.base_height - terrain.ground_lowering_m
         + (x * terrain.ramp_slope)
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude

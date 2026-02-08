@@ -57,6 +57,34 @@ label = "Missile Fire Rate +10%"
 max_stacks = 50
 value = 0.1
 
+[[run_upgrades.options]]
+effect = "vehicle_power_percent"
+id = "vehicle_power_plus_10_percent"
+label = "Car Power +10%"
+max_stacks = 50
+value = 0.1
+
+[[run_upgrades.options]]
+effect = "turret_cone_degrees_flat"
+id = "turret_cone_plus_5_degrees"
+label = "Targeting Cone +5 deg"
+max_stacks = 30
+value = 5.0
+
+[[run_upgrades.options]]
+effect = "missile_turn_rate_percent"
+id = "missile_turn_rate_plus_10_percent"
+label = "Missile Turn Speed +10%"
+max_stacks = 50
+value = 0.1
+
+[[run_upgrades.options]]
+effect = "turret_range_percent"
+id = "turret_range_plus_10_percent"
+label = "Targeting Range +10%"
+max_stacks = 50
+value = 0.1
+
 [scoring]
 airtime_points_per_second = 14.0
 flip_points = 120

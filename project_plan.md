@@ -343,6 +343,7 @@ environment = "ice"
   - choices are drawn from `game.toml::run_upgrades.options` with stack-cap filtering for future expansion beyond the current 3-option MVP.
 - [done] F4. Upgrade application system:
   - implemented runtime application for MVP upgrades: `health +10`, `gun fire rate +10%`, `missile fire rate +10%`.
+  - added upgrade effects for `car power +10%`, `targeting cone +5 deg`, `missile turn speed +10%`, and `targeting range +10%`.
   - upgrade definitions are data-driven (`effect`, `value`, `max_stacks`) and update live runtime config/player state.
 - [done] F5. Run end conditions:
   - health hits 0; show results screen with summary + restart.
@@ -395,9 +396,13 @@ environment = "ice"
 
 **Tasks**
 - [not started] H1. Title screen + quick start.
-- [not started] H2. HUD: health, distance, speed, score, upgrade icons, current segment label.
-- [not started] H3. Hit indicators (directional damage, screen shake light).
-- [not started] H4. Feedback polish:
+- [in progress] H2. HUD: health, distance, speed, score, upgrade icons, current segment label.
+  - [done] Added first-pass in-run HUD panel with score, HP bar, distance/speed, kills/coins, stunt totals, active segment, and live upgrade summary list.
+  - [done] Converted old debug overlay into a compact diagnostics panel so gameplay HUD remains readable during tuning.
+- [done] H3. Hit indicators (directional damage, screen shake light):
+  - edge damage indicators now flash by incoming hit direction (left/right/top/bottom).
+  - light camera shake now reacts to incoming damage, enemy crashes, and hard landings.
+- [done] H4. Feedback polish:
   - muzzle flash, screen shake on big hits, dust on landing, coin pickup sparkle.
 - [not started] H5. Audio mix:
   - music bed loop; mix levels; narration ducking.
@@ -477,6 +482,7 @@ environment = "ice"
   - HP zero transitions to `Results`.
   - scoring uses distance + kills + stunts + bonuses from TOML.
   - upgrade offers trigger by coin milestones and pause gameplay for selection.
+  - upgrade pool now includes handling, targeting, and missile homing improvements in addition to health/fire-rate options.
 - Upgrade UX decision: offer two random choices, selected with left/right controls, requiring a fresh keypress after panel opens.
 - Stability policy:
   - prefer disjoint queries/`Without`/combined-query patterns to avoid Bevy `B0001` conflicts.
@@ -506,12 +512,23 @@ environment = "ice"
   - hooked `owl_tower.glb` and `owl_bomber.glb` via `assets.toml` model entries.
   - enemy model setup now uses a simplified bounds fit (auto scale + center offset) against existing gameplay body size, keeping collider/hitbox logic unchanged.
   - owl model overrides: force facing-left orientation; tower uses 2x visual scale and bomber uses 3x for first-pass readability.
+  - hooked `beetle_rough.glb` for walker, `beetle_green.glb` for charger, and `bullfinch.glb` for flier via enemy-specific model IDs.
+  - beetle/bullfinch model orientation now matches owl facing (left-facing in world space).
+  - charger and flier hitbox radii increased by 30% for clearer contact/collision behavior.
+  - walker visual model scale set to 2.0x and flier (`bullfinch`) to 2.5x for readability.
+- Spawn pacing note:
+  - enemy bootstrap spacing increased by 25% (16m -> 20m).
 - Terrain/sample consistency note:
   - all gameplay systems that sample terrain height (vehicle, combat/projectile impacts, enemies, pickups) now apply `game.toml::terrain.ground_lowering_m` consistently.
 - Vehicle wheel readability note:
   - increased wheel hardpoint spread and added stronger model-wheel foreground Z bias to keep tires visibly in front of chassis during gameplay.
 - Ground-follow behavior note:
   - walker and charger enemy movement now follows terrain tangent (velocity projected along slope) and aligns body rotation to ground angle to avoid uphill sticking.
+- HUD polish note:
+  - introduced a dedicated gameplay HUD overlay (`src/ui/mod.rs`) separate from debug diagnostics to keep play info readable while preserving tuning data.
+- Feedback polish note:
+  - added a dedicated gameplay feedback layer (`src/gameplay/feedback/mod.rs`) for directional damage indicators, lightweight camera shake, landing dust particles, and pickup sparkle particles.
+  - extended runtime events with world positions (`PlayerDamageEvent`, `PickupCollectedEvent`, `VehicleLandingEvent`) so UI/FX can react contextually.
 
 ---
 

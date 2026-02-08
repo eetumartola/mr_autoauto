@@ -3,8 +3,8 @@ use crate::config::GameConfig;
 use crate::debug::{DebugCameraPanState, DebugGameplayGuards};
 use crate::gameplay::combat::TurretTargetingState;
 use crate::states::GameState;
-use bevy::camera::visibility::RenderLayers;
 use bevy::asset::{LoadState, RenderAssetUsages};
+use bevy::camera::visibility::RenderLayers;
 use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::primitives::RegularPolygon;
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
@@ -133,6 +133,7 @@ impl Plugin for VehicleGameplayPlugin {
             .init_resource::<StuntTrackingState>()
             .init_resource::<VehicleModelDebugState>()
             .add_message::<VehicleStuntEvent>()
+            .add_message::<VehicleLandingEvent>()
             .add_systems(
                 OnEnter(GameState::InRun),
                 (
@@ -435,6 +436,13 @@ pub enum VehicleStuntEvent {
     AirtimeHuge { duration_s: f32 },
     WheelieLong { duration_s: f32 },
     Flip { total_flips: u32 },
+}
+
+#[derive(Message, Debug, Clone, Copy, PartialEq)]
+pub struct VehicleLandingEvent {
+    pub world_position: Vec2,
+    pub impact_speed_mps: f32,
+    pub was_crash: bool,
 }
 
 impl Default for VehicleTelemetry {

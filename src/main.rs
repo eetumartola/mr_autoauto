@@ -4,6 +4,7 @@ mod config;
 mod debug;
 mod gameplay;
 mod states;
+mod ui;
 
 use assets::AssetRegistryPlugin;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
@@ -17,6 +18,7 @@ use config::ConfigPlugin;
 use debug::DebugOverlayPlugin;
 use gameplay::GameplayPlugin;
 use states::{GameState, GameStatePlugin};
+use ui::GameHudPlugin;
 
 fn main() {
     let mut app = App::new();
@@ -34,6 +36,7 @@ fn main() {
     .add_plugins(ConfigPlugin)
     .add_plugins(AssetRegistryPlugin)
     .add_plugins(DebugOverlayPlugin)
+    .add_plugins(GameHudPlugin)
     .add_plugins(CommentaryStubPlugin)
     .add_plugins(GameplayPlugin)
     .init_state::<GameState>()

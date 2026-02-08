@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 const ENEMY_SPAWN_START_AHEAD_M: f32 = 32.0;
-const ENEMY_SPAWN_SPACING_M: f32 = 16.0;
+const ENEMY_SPAWN_SPACING_M: f32 = 20.0;
 const ENEMY_DESPAWN_BEHIND_M: f32 = 48.0;
 const ENEMY_DESPAWN_AHEAD_M: f32 = 220.0;
 const GROUND_FOLLOW_SNAP_RATE: f32 = 14.0;
@@ -35,6 +35,9 @@ const ENEMY_MISSILE_THICKNESS_M: f32 = 0.16;
 const ENEMY_BOMB_LENGTH_M: f32 = 0.62;
 const ENEMY_BOMB_THICKNESS_M: f32 = 0.62;
 const ENEMY_PROJECTILE_ARC_GRAVITY_SCALE: f32 = 0.6;
+const ENEMY_MUZZLE_FLASH_SIZE_M: Vec2 = Vec2::new(0.34, 0.22);
+const ENEMY_MUZZLE_FLASH_LIFETIME_S: f32 = 0.07;
+const ENEMY_MUZZLE_FLASH_Z_M: f32 = ENEMY_PROJECTILE_Z_M + 0.16;
 const PLAYER_CONTACT_HIT_RADIUS_M: f32 = 1.45;
 const PLAYER_PROJECTILE_HIT_RADIUS_M: f32 = 1.25;
 const PLAYER_CRASH_MIN_SPEED_MPS: f32 = 2.0;
@@ -70,6 +73,7 @@ impl Plugin for EnemyGameplayPlugin {
                     resolve_enemy_projectile_hits_player,
                     apply_enemy_contact_damage_to_player,
                     update_enemy_hit_flash_effects,
+                    update_enemy_fade_out_fx,
                     update_enemy_health_bars,
                     despawn_far_enemies,
                     rearm_bootstrap_when_empty,
@@ -108,6 +112,13 @@ struct EnemyBaseColor(pub Color);
 
 #[derive(Component, Debug, Clone, Copy)]
 struct EnemyModelVisualActive;
+
+#[derive(Component, Debug, Clone, Copy)]
+struct EnemyFadeOutFx {
+    remaining_s: f32,
+    total_s: f32,
+    initial_alpha: f32,
+}
 
 #[derive(Component, Debug, Clone)]
 struct EnemyModelScene {
@@ -211,6 +222,7 @@ pub enum PlayerDamageSource {
 pub struct PlayerDamageEvent {
     pub amount: f32,
     pub source: PlayerDamageSource,
+    pub source_world_position: Option<Vec2>,
 }
 
 #[derive(Message, Debug, Clone)]
@@ -235,6 +247,7 @@ fn cleanup_enemy_run_entities(
         Or<(
             With<Enemy>,
             With<EnemyProjectile>,
+            With<EnemyFadeOutFx>,
             With<EnemyHpBarBackground>,
             With<EnemyHpBarFill>,
         )>,
@@ -377,15 +390,18 @@ fn spawn_enemy_instance(
     let model_scene = asset_registry
         .and_then(|registry| resolve_enemy_model_entry(registry, &enemy_cfg.id, behavior_kind))
         .and_then(|(model_id, model_entry)| {
-            model_entry.handle.as_ref().map(|handle| EnemyModelSceneSpawn {
-                handle: handle.clone(),
-                metadata: EnemyModelScene {
-                    owner: enemy_entity,
-                    model_id,
-                    scene_path: model_entry.scene_path.clone(),
-                    desired_size: body_size,
-                },
-            })
+            model_entry
+                .handle
+                .as_ref()
+                .map(|handle| EnemyModelSceneSpawn {
+                    handle: handle.clone(),
+                    metadata: EnemyModelScene {
+                        owner: enemy_entity,
+                        model_id,
+                        scene_path: model_entry.scene_path.clone(),
+                        desired_size: body_size,
+                    },
+                })
         });
 
     commands.entity(enemy_entity).with_children(|parent| {
@@ -432,15 +448,13 @@ fn spawn_enemy_instance(
 fn configure_enemy_model_visuals(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
-    mut scene_query: Query<
-        (
-            Entity,
-            &EnemyModelScene,
-            &mut EnemyModelRuntime,
-            &mut Transform,
-            &GlobalTransform,
-        ),
-    >,
+    mut scene_query: Query<(
+        Entity,
+        &EnemyModelScene,
+        &mut EnemyModelRuntime,
+        &mut Transform,
+        &GlobalTransform,
+    )>,
     children_query: Query<&Children>,
     mesh_node_query: Query<(&Mesh3d, &GlobalTransform), Without<EnemyModelScene>>,
     mut enemy_sprite_query: Query<&mut Sprite, With<Enemy>>,
@@ -550,7 +564,9 @@ fn update_enemy_behaviors(
     let player_x = player_transform.translation.x;
     let dt = time.delta_secs();
 
-    for (mut transform, mut velocity, mut behavior, motion, hitbox, enemy_type_id) in &mut enemy_query {
+    for (mut transform, mut velocity, mut behavior, motion, hitbox, enemy_type_id) in
+        &mut enemy_query
+    {
         let enemy_position = transform.translation.truncate();
         let ground_offset = hitbox.radius_m.max(0.15);
         behavior.elapsed_s += dt;
@@ -784,6 +800,12 @@ fn resolve_enemy_projectile_hits_player(
     let mut bullet_damage = 0.0;
     let mut missile_damage = 0.0;
     let mut bomb_damage = 0.0;
+    let mut bullet_source_sum = Vec2::ZERO;
+    let mut bullet_source_weight = 0.0;
+    let mut missile_source_sum = Vec2::ZERO;
+    let mut missile_source_weight = 0.0;
+    let mut bomb_source_sum = Vec2::ZERO;
+    let mut bomb_source_weight = 0.0;
     let mut consumed_projectiles = Vec::new();
     for (projectile_entity, transform, projectile) in &projectile_query {
         let projectile_position = transform.translation.truncate();
@@ -794,9 +816,21 @@ fn resolve_enemy_projectile_hits_player(
             let hit_damage = projectile.damage.max(0.0);
             total_damage += hit_damage;
             match projectile.kind {
-                EnemyProjectileKind::Bullet => bullet_damage += hit_damage,
-                EnemyProjectileKind::Missile => missile_damage += hit_damage,
-                EnemyProjectileKind::Bomb => bomb_damage += hit_damage,
+                EnemyProjectileKind::Bullet => {
+                    bullet_damage += hit_damage;
+                    bullet_source_sum += projectile_position * hit_damage.max(0.001);
+                    bullet_source_weight += hit_damage.max(0.001);
+                }
+                EnemyProjectileKind::Missile => {
+                    missile_damage += hit_damage;
+                    missile_source_sum += projectile_position * hit_damage.max(0.001);
+                    missile_source_weight += hit_damage.max(0.001);
+                }
+                EnemyProjectileKind::Bomb => {
+                    bomb_damage += hit_damage;
+                    bomb_source_sum += projectile_position * hit_damage.max(0.001);
+                    bomb_source_weight += hit_damage.max(0.001);
+                }
             }
             consumed_projectiles.push(projectile_entity);
         }
@@ -811,18 +845,33 @@ fn resolve_enemy_projectile_hits_player(
             player_damage_writer.write(PlayerDamageEvent {
                 amount: bullet_damage,
                 source: PlayerDamageSource::ProjectileBullet,
+                source_world_position: if bullet_source_weight > f32::EPSILON {
+                    Some(bullet_source_sum / bullet_source_weight)
+                } else {
+                    None
+                },
             });
         }
         if missile_damage > 0.0 {
             player_damage_writer.write(PlayerDamageEvent {
                 amount: missile_damage,
                 source: PlayerDamageSource::ProjectileMissile,
+                source_world_position: if missile_source_weight > f32::EPSILON {
+                    Some(missile_source_sum / missile_source_weight)
+                } else {
+                    None
+                },
             });
         }
         if bomb_damage > 0.0 {
             player_damage_writer.write(PlayerDamageEvent {
                 amount: bomb_damage,
                 source: PlayerDamageSource::ProjectileBomb,
+                source_world_position: if bomb_source_weight > f32::EPSILON {
+                    Some(bomb_source_sum / bomb_source_weight)
+                } else {
+                    None
+                },
             });
         }
     }
@@ -863,6 +912,8 @@ fn apply_enemy_contact_damage_to_player(
     let dt = time.delta_secs();
 
     let mut total_contact_damage = 0.0;
+    let mut contact_source_sum = Vec2::ZERO;
+    let mut contact_source_weight = 0.0;
     let mut dead_enemies: Vec<(Entity, String, Vec2)> = Vec::new();
     let mut current_colliding_enemies = HashSet::new();
     for (enemy_entity, enemy_transform, enemy_hitbox, enemy_type_id, mut enemy_health) in
@@ -885,7 +936,10 @@ fn apply_enemy_contact_damage_to_player(
             .distance_squared(player_position);
         if distance_sq <= combined_radius * combined_radius {
             current_colliding_enemies.insert(enemy_entity);
-            total_contact_damage += enemy_type.contact_damage.max(0.0) * dt;
+            let enemy_contact_damage = enemy_type.contact_damage.max(0.0) * dt;
+            total_contact_damage += enemy_contact_damage;
+            contact_source_sum += enemy_position * enemy_contact_damage.max(0.001);
+            contact_source_weight += enemy_contact_damage.max(0.001);
 
             if player_speed_mps >= PLAYER_CRASH_MIN_SPEED_MPS {
                 if !contact_tracker.currently_colliding.contains(&enemy_entity) {
@@ -913,6 +967,11 @@ fn apply_enemy_contact_damage_to_player(
         player_damage_writer.write(PlayerDamageEvent {
             amount: total_contact_damage,
             source: PlayerDamageSource::Contact,
+            source_world_position: if contact_source_weight > f32::EPSILON {
+                Some(contact_source_sum / contact_source_weight)
+            } else {
+                None
+            },
         });
     }
     contact_tracker.currently_colliding = current_colliding_enemies;
@@ -1026,6 +1085,8 @@ fn spawn_enemy_projectile(
     let projectile_center = muzzle_world + (shot_direction_world * (length_m * 0.5));
     let shot_angle = shot_direction_world.y.atan2(shot_direction_world.x);
 
+    spawn_enemy_muzzle_flash(commands, muzzle_world, color);
+
     commands.spawn((
         Name::new("EnemyProjectile"),
         EnemyProjectile {
@@ -1044,6 +1105,21 @@ fn spawn_enemy_projectile(
             ENEMY_PROJECTILE_Z_M,
         )
         .with_rotation(Quat::from_rotation_z(shot_angle)),
+    ));
+}
+
+fn spawn_enemy_muzzle_flash(commands: &mut Commands, muzzle_world: Vec2, projectile_color: Color) {
+    let rgba = projectile_color.to_srgba();
+    let flash_color = Color::srgba(rgba.red, rgba.green, rgba.blue, 0.86);
+    commands.spawn((
+        Name::new("EnemyMuzzleFlashFx"),
+        EnemyFadeOutFx {
+            remaining_s: ENEMY_MUZZLE_FLASH_LIFETIME_S,
+            total_s: ENEMY_MUZZLE_FLASH_LIFETIME_S.max(0.001),
+            initial_alpha: flash_color.to_srgba().alpha,
+        },
+        Sprite::from_color(flash_color, ENEMY_MUZZLE_FLASH_SIZE_M),
+        Transform::from_xyz(muzzle_world.x, muzzle_world.y, ENEMY_MUZZLE_FLASH_Z_M),
     ));
 }
 
@@ -1085,6 +1161,24 @@ fn update_enemy_hit_flash_effects(
             }
         } else {
             sprite.color = base_color.0;
+        }
+    }
+}
+
+fn update_enemy_fade_out_fx(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut fx_query: Query<(Entity, &mut EnemyFadeOutFx, &mut Sprite)>,
+) {
+    let dt = time.delta_secs().max(0.000_1);
+    for (entity, mut fx, mut sprite) in &mut fx_query {
+        fx.remaining_s -= dt;
+        let life_t = (fx.remaining_s / fx.total_s.max(0.001)).clamp(0.0, 1.0);
+        let mut color = sprite.color;
+        color.set_alpha(fx.initial_alpha * life_t);
+        sprite.color = color;
+        if fx.remaining_s <= 0.0 {
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -1197,14 +1291,23 @@ fn enemy_model_scale_multiplier(model: &EnemyModelScene) -> f32 {
         2.0
     } else if model.scene_path.contains("owl_bomber") {
         3.0
+    } else if model.scene_path.contains("beetle_rough") {
+        2.0
+    } else if model.scene_path.contains("bullfinch") {
+        2.5
     } else {
         1.0
     }
 }
 
 fn enemy_model_rotation(model: &EnemyModelScene) -> Quat {
-    if model.scene_path.contains("owl_tower") || model.scene_path.contains("owl_bomber") {
-        // Imported owl GLBs are forward on +Z; rotate so they face world -X (left).
+    if model.scene_path.contains("owl_tower")
+        || model.scene_path.contains("owl_bomber")
+        || model.scene_path.contains("beetle_rough")
+        || model.scene_path.contains("beetle_green")
+        || model.scene_path.contains("bullfinch")
+    {
+        // Imported GLBs here are forward on +Z; rotate so they face world -X (left).
         Quat::from_rotation_y(-FRAC_PI_2)
     } else {
         Quat::IDENTITY
@@ -1269,8 +1372,7 @@ fn aabb_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
 
 fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
     let terrain = &config.game.terrain;
-    terrain.base_height
-        - terrain.ground_lowering_m
+    terrain.base_height - terrain.ground_lowering_m
         + (x * terrain.ramp_slope)
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude
@@ -1280,9 +1382,15 @@ fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
 fn terrain_tangent_at_x(config: &GameConfig, x: f32) -> Vec2 {
     let terrain = &config.game.terrain;
     let slope = terrain.ramp_slope
-        + (x * terrain.wave_a_frequency).cos() * terrain.wave_a_amplitude * terrain.wave_a_frequency
-        + (x * terrain.wave_b_frequency).cos() * terrain.wave_b_amplitude * terrain.wave_b_frequency
-        + (x * terrain.wave_c_frequency).cos() * terrain.wave_c_amplitude * terrain.wave_c_frequency;
+        + (x * terrain.wave_a_frequency).cos()
+            * terrain.wave_a_amplitude
+            * terrain.wave_a_frequency
+        + (x * terrain.wave_b_frequency).cos()
+            * terrain.wave_b_amplitude
+            * terrain.wave_b_frequency
+        + (x * terrain.wave_c_frequency).cos()
+            * terrain.wave_c_amplitude
+            * terrain.wave_c_frequency;
     let tangent = Vec2::new(1.0, slope).normalize_or_zero();
     if tangent.length_squared() <= f32::EPSILON {
         Vec2::X

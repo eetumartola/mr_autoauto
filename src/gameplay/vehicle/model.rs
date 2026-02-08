@@ -252,25 +252,24 @@ pub(super) fn configure_player_vehicle_model_visuals(
             .fold(Vec3::ZERO, |acc, value| acc + value)
             / wheel_nodes.len() as f32;
 
-        let turret_snapshot = model
-            .expected_turret_node
-            .as_ref()
-            .and_then(|turret_name| {
-                find_named_node(&snapshots, turret_name)
-                    .cloned()
-                    .map(|snapshot| (turret_name.clone(), snapshot))
-            });
-        let turret_bounds = turret_snapshot.as_ref().and_then(|(turret_name, snapshot)| {
-            snapshot_mesh_bounds(snapshot, &meshes).map(|(min, max)| {
-                (
-                    turret_name.as_str(),
-                    snapshot.entity,
-                    snapshot.local_transform,
-                    min,
-                    max,
-                )
-            })
+        let turret_snapshot = model.expected_turret_node.as_ref().and_then(|turret_name| {
+            find_named_node(&snapshots, turret_name)
+                .cloned()
+                .map(|snapshot| (turret_name.clone(), snapshot))
         });
+        let turret_bounds = turret_snapshot
+            .as_ref()
+            .and_then(|(turret_name, snapshot)| {
+                snapshot_mesh_bounds(snapshot, &meshes).map(|(min, max)| {
+                    (
+                        turret_name.as_str(),
+                        snapshot.entity,
+                        snapshot.local_transform,
+                        min,
+                        max,
+                    )
+                })
+            });
 
         let front_center = (wheel_nodes[0].center + wheel_nodes[1].center) * 0.5;
         let rear_center = (wheel_nodes[2].center + wheel_nodes[3].center) * 0.5;
@@ -402,7 +401,8 @@ pub(super) fn configure_player_vehicle_model_visuals(
         }
 
         for wheel in &wheel_nodes {
-            let source_wheel_radius_local = wheel_estimated_radius_from_bounds(wheel.min, wheel.max);
+            let source_wheel_radius_local =
+                wheel_estimated_radius_from_bounds(wheel.min, wheel.max);
             let source_wheel_radius_after_scene_scale = source_wheel_radius_local * scale;
             let desired_visual_wheel_radius = PLAYER_WHEEL_RADIUS_M * PLAYER_WHEEL_VISUAL_SCALE;
             let visual_scale_multiplier = if source_wheel_radius_after_scene_scale > f32::EPSILON {
@@ -701,8 +701,9 @@ pub(super) fn sync_player_vehicle_visual_aim_and_model_wheels(
             desired_pivot_world.z += PLAYER_MODEL_WHEEL_FOREGROUND_Z_BIAS_M;
             if let Ok(parent_global) = global_transform_query.get(child_of.0) {
                 let parent_to_world = parent_global.affine();
-                let pivot_in_parent =
-                    parent_to_world.inverse().transform_point3a(desired_pivot_world.into());
+                let pivot_in_parent = parent_to_world
+                    .inverse()
+                    .transform_point3a(desired_pivot_world.into());
                 let rotated_pivot_local = rotation * (effective_scale * wheel_node.pivot_local);
                 transform.translation = Vec3::from(pivot_in_parent) - rotated_pivot_local;
                 continue;
@@ -779,4 +780,3 @@ fn apply_uniform_vertex_color(mesh: &mut Mesh, color: [f32; 4]) {
     let colors = vec![color; vertex_count];
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
 }
-

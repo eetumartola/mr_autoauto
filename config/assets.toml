@@ -40,6 +40,24 @@ scene_path = "models/enemies/owl_bomber.glb#Scene0"
 root_node = "ROOT"
 wheel_nodes = ["ROOT"]
 
+[[models]]
+id = "enemy_grunt_walker"
+scene_path = "models/enemies/beetle_rough.glb#Scene0"
+root_node = "ROOT"
+wheel_nodes = ["ROOT"]
+
+[[models]]
+id = "enemy_charger_buggy"
+scene_path = "models/enemies/beetle_green.glb#Scene0"
+root_node = "ROOT"
+wheel_nodes = ["ROOT"]
+
+[[models]]
+id = "enemy_drone_flier"
+scene_path = "models/enemies/bullfinch.glb#Scene0"
+root_node = "ROOT"
+wheel_nodes = ["ROOT"]
+
 [[splats]]
 id = "museum_hall_01"
 path = "splats/museum_hall_01.gcloud"
