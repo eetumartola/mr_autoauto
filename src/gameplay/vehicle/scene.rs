@@ -153,7 +153,7 @@ pub(super) fn spawn_vehicle_scene(
                 PlayerChassisVisual,
                 PlayerVehiclePlaceholderVisual,
                 Sprite::from_color(Color::srgb(0.93, 0.34, 0.24), PLAYER_CHASSIS_SIZE),
-                Transform::from_xyz(0.0, -0.02 + PLAYER_VISUAL_RIDE_HEIGHT_OFFSET_M, 0.18),
+                Transform::from_xyz(0.0, -0.02 + PLAYER_VISUAL_RIDE_HEIGHT_OFFSET_M, 0.00),
             ));
 
             parent.spawn((
@@ -183,7 +183,7 @@ pub(super) fn spawn_vehicle_scene(
                 Transform::from_xyz(
                     PLAYER_FRONT_HARDPOINT_X_M,
                     PLAYER_FRONT_HARDPOINT_Y_M - vehicle.suspension_rest_length_m,
-                    0.34,
+                    0.80,
                 )
                 .with_scale(Vec3::splat(PLAYER_WHEEL_VISUAL_SCALE)),
             ));
@@ -204,7 +204,7 @@ pub(super) fn spawn_vehicle_scene(
                 Transform::from_xyz(
                     PLAYER_REAR_HARDPOINT_X_M,
                     PLAYER_REAR_HARDPOINT_Y_M - vehicle.suspension_rest_length_m,
-                    0.34,
+                    0.80,
                 )
                 .with_scale(Vec3::splat(PLAYER_WHEEL_VISUAL_SCALE)),
             ));

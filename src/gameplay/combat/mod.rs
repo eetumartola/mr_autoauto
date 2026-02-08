@@ -11,7 +11,8 @@ use std::f32::consts::{PI, TAU};
 const TURRET_MOUNT_OFFSET_LOCAL: Vec3 = Vec3::new(0.35, 1.05, 2.5);
 const TARGET_LASER_THICKNESS_M: f32 = 0.12;
 const TARGET_CONE_LINE_THICKNESS_M: f32 = 0.08;
-const TARGET_LINE_OPACITY: f32 = 0.30;
+const TARGET_LASER_OPACITY: f32 = 0.15;
+const TARGET_CONE_OPACITY: f32 = 0.10;
 const TARGET_LASER_Z: f32 = 0.8;
 const TARGET_CONE_Z: f32 = 0.7;
 const PROJECTILE_Z: f32 = 2.1;
@@ -218,7 +219,7 @@ fn spawn_turret_visuals(
             Name::new("TurretTargetLaserVisual"),
             TurretTargetLaserVisual,
             Sprite::from_color(
-                Color::srgba(0.23, 0.72, 0.96, TARGET_LINE_OPACITY),
+                Color::srgba(0.23, 0.72, 0.96, TARGET_LASER_OPACITY),
                 Vec2::new(1.0, TARGET_LASER_THICKNESS_M),
             ),
             Transform::from_xyz(0.0, 0.0, TARGET_LASER_Z),
@@ -229,7 +230,7 @@ fn spawn_turret_visuals(
                 Name::new("TurretConeBoundaryVisual"),
                 TurretConeBoundaryVisual { side_sign },
                 Sprite::from_color(
-                    Color::srgba(0.24, 0.87, 0.38, TARGET_LINE_OPACITY),
+                    Color::srgba(0.24, 0.87, 0.38, TARGET_CONE_OPACITY),
                     Vec2::new(1.0, TARGET_CONE_LINE_THICKNESS_M),
                 ),
                 Transform::from_xyz(0.0, 0.0, TARGET_CONE_Z),
@@ -820,6 +821,7 @@ fn spawn_fade_out_fx(
 fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
     let terrain = &config.game.terrain;
     terrain.base_height
+        - terrain.ground_lowering_m
         + (x * terrain.ramp_slope)
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude

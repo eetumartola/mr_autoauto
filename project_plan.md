@@ -505,6 +505,13 @@ environment = "ice"
 - Enemy model visual-fit pass:
   - hooked `owl_tower.glb` and `owl_bomber.glb` via `assets.toml` model entries.
   - enemy model setup now uses a simplified bounds fit (auto scale + center offset) against existing gameplay body size, keeping collider/hitbox logic unchanged.
+  - owl model overrides: force facing-left orientation; tower uses 2x visual scale and bomber uses 3x for first-pass readability.
+- Terrain/sample consistency note:
+  - all gameplay systems that sample terrain height (vehicle, combat/projectile impacts, enemies, pickups) now apply `game.toml::terrain.ground_lowering_m` consistently.
+- Vehicle wheel readability note:
+  - increased wheel hardpoint spread and added stronger model-wheel foreground Z bias to keep tires visibly in front of chassis during gameplay.
+- Ground-follow behavior note:
+  - walker and charger enemy movement now follows terrain tangent (velocity projected along slope) and aligns body rotation to ground angle to avoid uphill sticking.
 
 ---
 

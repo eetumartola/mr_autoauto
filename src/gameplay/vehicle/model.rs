@@ -697,7 +697,8 @@ pub(super) fn sync_player_vehicle_visual_aim_and_model_wheels(
         let rotation = wheel_node.base_rotation * spin_delta;
         transform.rotation = rotation;
         transform.scale = effective_scale;
-        if let Some(desired_pivot_world) = desired_wheel_pivot_world {
+        if let Some(mut desired_pivot_world) = desired_wheel_pivot_world {
+            desired_pivot_world.z += PLAYER_MODEL_WHEEL_FOREGROUND_Z_BIAS_M;
             if let Ok(parent_global) = global_transform_query.get(child_of.0) {
                 let parent_to_world = parent_global.affine();
                 let pivot_in_parent =

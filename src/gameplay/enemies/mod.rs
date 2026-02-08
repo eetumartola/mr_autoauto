@@ -8,7 +8,7 @@ use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::collections::HashSet;
-use std::f32::consts::TAU;
+use std::f32::consts::{FRAC_PI_2, TAU};
 
 const ENEMY_SPAWN_START_AHEAD_M: f32 = 32.0;
 const ENEMY_SPAWN_SPACING_M: f32 = 16.0;
@@ -25,8 +25,8 @@ const ENEMY_ATTACK_RANGE_M: f32 = 38.0;
 const ENEMY_BOMBER_DROP_RANGE_M: f32 = 8.5;
 const ENEMY_FLIER_ARC_ANGLE_RAD: f32 = 0.28;
 const ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD: f32 = 0.16;
-const ENEMY_BOMBER_ALTITUDE_SCALE: f32 = 1.2;
-const ENEMY_BOMBER_ALTITUDE_DEFAULT_M: f32 = 8.0;
+const ENEMY_BOMBER_ALTITUDE_SCALE: f32 = 1.5;
+const ENEMY_BOMBER_ALTITUDE_DEFAULT_M: f32 = 10.0;
 const ENEMY_PROJECTILE_Z_M: f32 = 2.0;
 const ENEMY_BULLET_LENGTH_M: f32 = 0.42;
 const ENEMY_BULLET_THICKNESS_M: f32 = 0.10;
@@ -489,14 +489,19 @@ fn configure_enemy_model_visuals(
         let target_size = model.desired_size.max(Vec2::splat(0.05));
         let scale_x = target_size.x / source_size.x.max(0.001);
         let scale_y = target_size.y / source_size.y.max(0.001);
-        let uniform_scale = scale_x.min(scale_y).clamp(0.01, 500.0);
+        let fit_scale = scale_x.min(scale_y).clamp(0.01, 500.0);
+        let model_scale_multiplier = enemy_model_scale_multiplier(model);
+        let uniform_scale = (fit_scale * model_scale_multiplier).clamp(0.01, 500.0);
+        let model_rotation = enemy_model_rotation(model);
 
         let source_center = (local_min + local_max) * 0.5;
+        let rotated_center = model_rotation * source_center;
+        scene_transform.rotation = model_rotation;
         scene_transform.scale = Vec3::splat(uniform_scale);
         scene_transform.translation = Vec3::new(
-            -source_center.x * uniform_scale,
-            -source_center.y * uniform_scale,
-            ENEMY_MODEL_LOCAL_Z_M,
+            -rotated_center.x * uniform_scale,
+            -rotated_center.y * uniform_scale,
+            ENEMY_MODEL_LOCAL_Z_M - (rotated_center.z * uniform_scale),
         );
         runtime.configured = true;
 
@@ -506,7 +511,7 @@ fn configure_enemy_model_visuals(
         }
 
         info!(
-            "Enemy model setup: enemy=`{}` model=`{}` scene=`{}` fitted size=({:.3}, {:.3}) source=({:.3}, {:.3}, {:.3}) scale={:.3}",
+            "Enemy model setup: enemy=`{}` model=`{}` scene=`{}` fitted size=({:.3}, {:.3}) source=({:.3}, {:.3}, {:.3}) fit_scale={:.3} final_scale={:.3} rotation_y_deg={:.1}",
             model.owner.index(),
             model.model_id,
             model.scene_path,
@@ -515,7 +520,9 @@ fn configure_enemy_model_visuals(
             source_size.x,
             source_size.y,
             source_size.z,
-            uniform_scale
+            fit_scale,
+            uniform_scale,
+            scene_transform.rotation.to_euler(EulerRot::XYZ).1.to_degrees()
         );
     }
 }
@@ -527,7 +534,7 @@ fn update_enemy_behaviors(
     player_query: Query<&Transform, (With<PlayerVehicle>, Without<Enemy>)>,
     mut enemy_query: Query<
         (
-            &Transform,
+            &mut Transform,
             &mut Velocity,
             &mut EnemyBehavior,
             &EnemyMotion,
@@ -543,7 +550,7 @@ fn update_enemy_behaviors(
     let player_x = player_transform.translation.x;
     let dt = time.delta_secs();
 
-    for (transform, mut velocity, mut behavior, motion, hitbox, enemy_type_id) in &mut enemy_query {
+    for (mut transform, mut velocity, mut behavior, motion, hitbox, enemy_type_id) in &mut enemy_query {
         let enemy_position = transform.translation.truncate();
         let ground_offset = hitbox.radius_m.max(0.15);
         behavior.elapsed_s += dt;
@@ -551,9 +558,14 @@ fn update_enemy_behaviors(
 
         match behavior.kind {
             EnemyBehaviorKind::Walker => {
-                desired_velocity.x = -motion.base_speed_mps;
+                let ground_tangent = terrain_tangent_at_x(&config, enemy_position.x);
                 let ground_y = terrain_height_at_x(&config, enemy_position.x) + ground_offset;
-                desired_velocity.y = (ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE;
+                let along_ground = -ground_tangent * motion.base_speed_mps;
+                desired_velocity.x = along_ground.x;
+                desired_velocity.y =
+                    along_ground.y + ((ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE);
+                transform.rotation =
+                    Quat::from_rotation_z(ground_tangent.y.atan2(ground_tangent.x));
             }
             EnemyBehaviorKind::Flier => {
                 desired_velocity.x = -(motion.base_speed_mps * 0.82);
@@ -576,9 +588,14 @@ fn update_enemy_behaviors(
                 } else {
                     0.55
                 };
-                desired_velocity.x = -(motion.base_speed_mps * charge_multiplier);
+                let ground_tangent = terrain_tangent_at_x(&config, enemy_position.x);
                 let ground_y = terrain_height_at_x(&config, enemy_position.x) + ground_offset;
-                desired_velocity.y = (ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE;
+                let along_ground = -ground_tangent * (motion.base_speed_mps * charge_multiplier);
+                desired_velocity.x = along_ground.x;
+                desired_velocity.y =
+                    along_ground.y + ((ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE);
+                transform.rotation =
+                    Quat::from_rotation_z(ground_tangent.y.atan2(ground_tangent.x));
             }
             EnemyBehaviorKind::Bomber => {
                 desired_velocity.x = -(motion.base_speed_mps * 0.95);
@@ -1175,6 +1192,25 @@ fn resolve_enemy_model_entry<'a>(
         .map(|entry| (behavior_id.to_string(), entry))
 }
 
+fn enemy_model_scale_multiplier(model: &EnemyModelScene) -> f32 {
+    if model.scene_path.contains("owl_tower") {
+        2.0
+    } else if model.scene_path.contains("owl_bomber") {
+        3.0
+    } else {
+        1.0
+    }
+}
+
+fn enemy_model_rotation(model: &EnemyModelScene) -> Quat {
+    if model.scene_path.contains("owl_tower") || model.scene_path.contains("owl_bomber") {
+        // Imported owl GLBs are forward on +Z; rotate so they face world -X (left).
+        Quat::from_rotation_y(-FRAC_PI_2)
+    } else {
+        Quat::IDENTITY
+    }
+}
+
 fn collect_descendants(root: Entity, children_query: &Query<&Children>, out: &mut Vec<Entity>) {
     let mut stack = vec![root];
     while let Some(entity) = stack.pop() {
@@ -1239,4 +1275,18 @@ fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
         + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
         + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude
         + (x * terrain.wave_c_frequency).sin() * terrain.wave_c_amplitude
+}
+
+fn terrain_tangent_at_x(config: &GameConfig, x: f32) -> Vec2 {
+    let terrain = &config.game.terrain;
+    let slope = terrain.ramp_slope
+        + (x * terrain.wave_a_frequency).cos() * terrain.wave_a_amplitude * terrain.wave_a_frequency
+        + (x * terrain.wave_b_frequency).cos() * terrain.wave_b_amplitude * terrain.wave_b_frequency
+        + (x * terrain.wave_c_frequency).cos() * terrain.wave_c_amplitude * terrain.wave_c_frequency;
+    let tangent = Vec2::new(1.0, slope).normalize_or_zero();
+    if tangent.length_squared() <= f32::EPSILON {
+        Vec2::X
+    } else {
+        tangent
+    }
 }
