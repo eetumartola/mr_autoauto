@@ -108,7 +108,7 @@ gun_shot_volume = 1.0
 master_volume = 1.0
 missile_hit_volume = 0.3199999928474426
 missile_launch_volume = 0.8799999952316284
-music_volume = 0.25
+music_volume = 0.15000000596046448
 pitch_random_max = 1.06
 pitch_random_min = 0.94
 

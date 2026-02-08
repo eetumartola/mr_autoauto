@@ -8,11 +8,9 @@ pub(super) fn spawn_vehicle_scene(
     config: Res<GameConfig>,
     asset_registry: Option<Res<AssetRegistry>>,
     asset_server: Res<AssetServer>,
-    camera_query: Query<Entity, With<Camera2d>>,
     existing_player: Query<Entity, With<PlayerVehicle>>,
     existing_ground: Query<Entity, With<GroundVisual>>,
     existing_background: Query<Entity, With<BackgroundVisual>>,
-    existing_yardstick: Query<Entity, With<YardstickVisualRoot>>,
     existing_model_camera: Query<Entity, With<PlayerVehicleModelCamera>>,
 ) {
     #[cfg(not(feature = "gaussian_splats"))]
@@ -365,57 +363,6 @@ pub(super) fn spawn_vehicle_scene(
             });
         }
     }
-
-    if existing_yardstick.is_empty() {
-        let Ok(camera_entity) = camera_query.single() else {
-            return;
-        };
-
-        let yardstick_root = commands
-            .spawn((
-                Name::new("YardstickVisualRoot"),
-                YardstickVisualRoot,
-                Transform::from_translation(YARDSTICK_OFFSET_FROM_CAMERA),
-                GlobalTransform::default(),
-                Visibility::Inherited,
-                InheritedVisibility::VISIBLE,
-                ViewVisibility::default(),
-            ))
-            .id();
-
-        commands.entity(camera_entity).add_child(yardstick_root);
-        commands.entity(yardstick_root).with_children(|parent| {
-            parent.spawn((
-                Name::new("YardstickBase"),
-                Sprite::from_color(
-                    Color::srgba(0.82, 0.86, 0.92, 0.90),
-                    Vec2::new(YARDSTICK_LENGTH_M, YARDSTICK_BASE_THICKNESS_M),
-                ),
-                Transform::from_xyz(0.0, 0.0, 0.0),
-            ));
-
-            let notch_count = (YARDSTICK_LENGTH_M / YARDSTICK_INTERVAL_M).round() as i32;
-            for notch_index in 0..=notch_count {
-                let distance_m = notch_index as f32 * YARDSTICK_INTERVAL_M;
-                let x = -YARDSTICK_LENGTH_M * 0.5 + distance_m;
-                let is_major = (distance_m % YARDSTICK_MAJOR_INTERVAL_M).abs() < 0.01;
-                let notch_height = if is_major {
-                    YARDSTICK_MAJOR_NOTCH_HEIGHT_M
-                } else {
-                    YARDSTICK_MINOR_NOTCH_HEIGHT_M
-                };
-
-                parent.spawn((
-                    Name::new("YardstickNotch"),
-                    Sprite::from_color(
-                        Color::srgba(0.82, 0.86, 0.92, if is_major { 0.94 } else { 0.72 }),
-                        Vec2::new(YARDSTICK_NOTCH_THICKNESS_M, notch_height),
-                    ),
-                    Transform::from_xyz(x, (YARDSTICK_BASE_THICKNESS_M + notch_height) * 0.5, 0.01),
-                ));
-            }
-        });
-    }
 }
 
 pub(super) fn cleanup_vehicle_scene(
@@ -423,7 +370,6 @@ pub(super) fn cleanup_vehicle_scene(
     player_query: Query<Entity, With<PlayerVehicle>>,
     ground_query: Query<Entity, With<GroundVisual>>,
     background_query: Query<Entity, With<BackgroundVisual>>,
-    yardstick_query: Query<Entity, With<YardstickVisualRoot>>,
     model_camera_query: Query<Entity, With<PlayerVehicleModelCamera>>,
 ) {
     for entity in &player_query {
@@ -433,9 +379,6 @@ pub(super) fn cleanup_vehicle_scene(
         commands.entity(entity).try_despawn();
     }
     for entity in &background_query {
-        commands.entity(entity).try_despawn();
-    }
-    for entity in &yardstick_query {
         commands.entity(entity).try_despawn();
     }
     for entity in &model_camera_query {

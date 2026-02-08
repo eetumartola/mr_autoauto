@@ -314,7 +314,7 @@ environment = "ice"
 - [in progress] E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
   - first splat asset hook is active via `backgrounds.toml::splat_asset_id` + `assets.toml::splats`.
   - [done] Added background placement tuning workflow (`B` debug panel): live `parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m`, `ground_lowering_m` edits + apply persists to `backgrounds.toml` and `game.toml`.
-  - [done] Segment naming pass: active segment IDs are now `cemetery`, `castle`, and `mythical` (with `cemetery` first).
+  - [done] Segment naming pass: active segment IDs are now `castle`, `cemetery`, and `mythical` (with `castle` first).
   - [done] Runtime splat background sync now follows the currently active segment by run distance and swaps splat assets when segment changes.
   - [done] Terrain wave settings (`wave_a/b/c` amplitude/frequency) are now segment-specific via `backgrounds.toml`; all terrain sampling systems resolve values from the active segment.
 - [not started] E2. Segment placement:
@@ -495,7 +495,7 @@ environment = "ice"
   - scoring uses distance + kills + stunts + bonuses from TOML.
   - upgrade offers trigger by coin milestones and pause gameplay for selection.
 - Segment pacing decision:
-  - segment lengths set to `cemetery=768m`, `castle=512m`, `mythical=1024m`.
+  - segment lengths set to `castle=512m`, `cemetery=768m`, `mythical=1024m`.
   - boss encounter triggers 20m before segment end.
   - while the segment boss is alive (or portal is pending), player progression is gated at the boss line so the run stays in the current segment.
   - defeating the boss advances/teleports run to the next segment start.
@@ -516,6 +516,7 @@ environment = "ice"
   - `bevy_gaussian_splatting` sort system expects non-negative camera order; do not use negative `Camera::order` on Gaussian cameras.
   - on Windows, default WGPU backend to DX12 (unless overridden via `WGPU_BACKEND`) to improve compatibility with external game-capture tools.
   - lowered vendored Gaussian radix-sort shader workgroup pressure (4-bit digits) to avoid compute pipeline validation failures on adapters with `max_compute_invocations_per_workgroup < 1024` (for example 768).
+  - on runtime splat-handle swaps, clear stale sorted-entry handles and force bind-group refresh on changed cloud/sorted handles to prevent cross-segment cloud mix-ups and sorted-buffer size overflows.
 - Maintenance decisions:
   - split oversized files during follow-up refactors (`vehicle` and `commentary_stub` are both past the preferred size threshold).
   - completed first `vehicle` split pass: `src/gameplay/vehicle/mod.rs` now coordinates constants/types/plugin only; systems moved into `scene.rs`, `model.rs`, `runtime.rs`, and `terrain.rs`.

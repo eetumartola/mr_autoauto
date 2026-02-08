@@ -705,7 +705,7 @@ pub(super) fn sync_splat_background_runtime_from_config(
                 cloud_handle.0 = active_handle.clone();
                 commands
                     .entity(cloud_entity)
-                    .remove::<SplatBackgroundSorted>();
+                    .remove::<(SplatBackgroundSorted, SortedEntriesHandle)>();
                 info!(
                     "Switched active splat background to `{}` from `{}` for segment `{}`.",
                     active_splat_id, active_splat_path, active_segment_id

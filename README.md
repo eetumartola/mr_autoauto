@@ -1,5 +1,6 @@
 # Mr. Autoauto
 ![Mr. Autoauto Logo](assets/sprites/autoauto_logo.jpg)
+[![Watch gameplay video](https://img.youtube.com/vi/rk2qad4GENs/maxresdefault.jpg)](https://youtu.be/rk2qad4GENs)
 
 Mr. Autoauto is a 2.5D hill-climb combat prototype built with Rust + Bevy.
 You drive over deforming terrain, fight enemy waves, collect drops/upgrades, and get dual-commentator narration/subtitles (with optional Neocortex chat+voice API integration).

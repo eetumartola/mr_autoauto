@@ -325,16 +325,16 @@ type GpuCloudBundleQuery<R> = (
 #[cfg(feature = "buffer_storage")]
 type GpuCloudBindGroupQuery<R> = (
     Entity,
-    &'static <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle,
-    &'static SortedEntriesHandle,
+    Ref<'static, <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle>,
+    Ref<'static, SortedEntriesHandle>,
     Option<&'static SortBindGroup>,
 );
 
 #[cfg(feature = "buffer_texture")]
 type GpuCloudBindGroupQuery<R> = (
     Entity,
-    &'static <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle,
-    &'static SortedEntriesHandle,
+    Ref<'static, <R as bevy_interleave::prelude::PlanarSync>::PlanarTypeHandle>,
+    Ref<'static, SortedEntriesHandle>,
     Option<&'static SortBindGroup>,
     &'static texture::GpuTextureBuffers,
 );
@@ -1052,7 +1052,8 @@ fn queue_gaussian_bind_group<R: PlanarSync>(
         #[cfg(not(feature = "buffer_texture"))]
         let (entity, cloud_handle, sorted_entries_handle, existing_bind_group) = query;
 
-        if !should_refresh_for_assets && existing_bind_group.is_some() {
+        let handle_changed = cloud_handle.is_changed() || sorted_entries_handle.is_changed();
+        if !should_refresh_for_assets && !handle_changed && existing_bind_group.is_some() {
             continue;
         }
 

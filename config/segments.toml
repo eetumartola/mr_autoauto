@@ -1,4 +1,10 @@
 [[segment_sequence]]
+id = "mythical"
+length = 1024.0
+environment = "normal"
+spawn_set = "starter_wave"
+
+[[segment_sequence]]
 id = "cemetery"
 length = 768.0
 environment = "normal"
@@ -7,11 +13,5 @@ spawn_set = "starter_wave"
 [[segment_sequence]]
 id = "castle"
 length = 512.0
-environment = "normal"
-spawn_set = "starter_wave"
-
-[[segment_sequence]]
-id = "mythical"
-length = 1024.0
 environment = "normal"
 spawn_set = "starter_wave"

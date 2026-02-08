@@ -18,8 +18,8 @@ use std::path::Path;
 
 #[cfg(feature = "gaussian_splats")]
 use bevy_gaussian_splatting::{
-    sort::SortMode, CloudSettings, Gaussian3d, GaussianCamera, PlanarGaussian3d,
-    PlanarGaussian3dHandle,
+    sort::{SortMode, SortedEntriesHandle},
+    CloudSettings, Gaussian3d, GaussianCamera, PlanarGaussian3d, PlanarGaussian3dHandle,
 };
 
 mod model;
@@ -113,14 +113,6 @@ const PLAYER_HP_BAR_BG_HEIGHT_M: f32 = 0.26;
 const PLAYER_HP_BAR_FILL_HEIGHT_M: f32 = 0.16;
 const PLAYER_HP_BAR_Z_M: f32 = 0.9;
 const PLAYER_MODEL_SETUP_DEPTH_Z: f32 = PLAYER_MODEL_SCENE_Z;
-const YARDSTICK_LENGTH_M: f32 = 40.0;
-const YARDSTICK_INTERVAL_M: f32 = 5.0;
-const YARDSTICK_MAJOR_INTERVAL_M: f32 = 10.0;
-const YARDSTICK_BASE_THICKNESS_M: f32 = 0.08;
-const YARDSTICK_MINOR_NOTCH_HEIGHT_M: f32 = 0.34;
-const YARDSTICK_MAJOR_NOTCH_HEIGHT_M: f32 = 0.62;
-const YARDSTICK_NOTCH_THICKNESS_M: f32 = 0.07;
-const YARDSTICK_OFFSET_FROM_CAMERA: Vec3 = Vec3::new(-35.0, -20.0, 60.0);
 const PLAYER_MODEL_SCENE_Z: f32 = 0.30;
 const PLAYER_MODEL_CAMERA_Z_M: f32 = 140.0;
 const PLAYER_MODEL_SCALE_MULTIPLIER: f32 = 1.36;
@@ -245,9 +237,6 @@ struct GroundStripVisual;
 
 #[derive(Component)]
 struct GroundCurtainVisual;
-
-#[derive(Component)]
-struct YardstickVisualRoot;
 
 #[derive(Component, Debug, Clone, Copy)]
 struct PlayerHpBarBackground;
