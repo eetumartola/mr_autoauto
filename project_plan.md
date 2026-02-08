@@ -490,6 +490,8 @@ environment = "ice"
   - upgrade offers trigger by coin milestones and pause gameplay for selection.
   - upgrade pool now includes handling, targeting, and missile homing improvements in addition to health/fire-rate options.
 - Upgrade UX decision: offer two random choices, selected with left/right controls, requiring a fresh keypress after panel opens.
+  - after selection, keep the upgrade panel briefly visible with a clear selected-card highlight before closing.
+  - do not mutate card/header text during the post-selection hold; keep layout stable and only use visual highlight.
 - Stability policy:
   - prefer disjoint queries/`Without`/combined-query patterns to avoid Bevy `B0001` conflicts.
   - use `try_despawn()` for resilience against duplicate-despawn command races.
@@ -532,7 +534,12 @@ environment = "ice"
 - Ground-follow behavior note:
   - walker and charger enemy movement now follows terrain tangent (velocity projected along slope) and aligns body rotation to ground angle to avoid uphill sticking.
   - increased walker/charger velocity response (acceleration toward target velocity) so they can recover speed and climb slopes more reliably.
+  - added explicit uphill speed boost and stronger ground-follow rates for walker/charger to better handle steeper slope transitions.
   - bomber cruise path now includes a subtle sine-wave vertical motion instead of perfectly straight flight.
+  - bomber cruise wave period increased (frequency halved) for a longer, smoother vertical oscillation.
+  - enemy projectile firing is constrained to forward/up sectors; backward shots are clamped out.
+- Debug UX update:
+  - on-screen debug text overlays are hidden by default and can be toggled with `O`.
 - HUD polish note:
   - introduced a dedicated gameplay HUD overlay (`src/ui/mod.rs`) separate from debug diagnostics to keep play info readable while preserving tuning data.
   - raised the world-space player HP bar offset slightly so it clears the turret more clearly.

@@ -4,26 +4,6 @@ default_vehicle = "starter_car"
 fixed_timestep_hz = 60.0
 starting_environment = "normal"
 
-[sfx]
-enabled = true
-master_volume = 1.0
-music_volume = 0.42
-pitch_random_min = 0.94
-pitch_random_max = 1.06
-engine_volume = 0.32
-engine_base_speed = 0.82
-engine_accel_speed_boost = 0.56
-engine_velocity_speed_boost = 0.34
-engine_idle_gain = 0.30
-engine_load_gain = 0.68
-engine_pitch_jitter = 0.015
-gun_shot_volume = 0.30
-gun_hit_volume = 0.26
-gun_miss_volume = 0.18
-missile_launch_volume = 0.34
-missile_hit_volume = 0.32
-explode_volume = 0.40
-
 [pickups]
 bounce_damping = 0.28
 coin_jitter_x_m = 0.24
@@ -111,6 +91,26 @@ flip_points = 120
 no_damage_bonus = 600
 points_per_meter = 1.0
 wheelie_points_per_second = 18.0
+
+[sfx]
+enabled = true
+engine_accel_speed_boost = 0.56
+engine_base_speed = 0.82
+engine_idle_gain = 0.3
+engine_load_gain = 0.68
+engine_pitch_jitter = 0.015
+engine_velocity_speed_boost = 0.34
+engine_volume = 0.699999988079071
+explode_volume = 0.4000000059604645
+gun_hit_volume = 0.25999999046325684
+gun_miss_volume = 0.18000000715255737
+gun_shot_volume = 1.0
+master_volume = 1.0
+missile_hit_volume = 0.3199999928474426
+missile_launch_volume = 0.8799999952316284
+music_volume = 0.25
+pitch_random_max = 1.06
+pitch_random_min = 0.94
 
 [terrain]
 base_height = -8.5

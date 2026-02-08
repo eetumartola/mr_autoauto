@@ -107,7 +107,7 @@ struct DebugTextOverlayState {
 
 impl Default for DebugTextOverlayState {
     fn default() -> Self {
-        Self { visible: true }
+        Self { visible: false }
     }
 }
 

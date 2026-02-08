@@ -27,7 +27,7 @@ const ENEMY_FLIER_ARC_ANGLE_RAD: f32 = 0.28;
 const ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD: f32 = 0.16;
 const ENEMY_BOMBER_ALTITUDE_SCALE: f32 = 1.5;
 const ENEMY_BOMBER_ALTITUDE_DEFAULT_M: f32 = 10.0;
-const ENEMY_BOMBER_CRUISE_WAVE_FREQUENCY_HZ: f32 = 0.22;
+const ENEMY_BOMBER_CRUISE_WAVE_FREQUENCY_HZ: f32 = 0.11;
 const ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_FACTOR: f32 = 0.2;
 const ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_MAX_M: f32 = 2.2;
 const ENEMY_PROJECTILE_Z_M: f32 = 2.0;
@@ -53,9 +53,13 @@ const ENEMY_MIN_MASS: f32 = 2.4;
 const ENEMY_MODEL_LOCAL_Z_M: f32 = 0.24;
 const ENEMY_GAMEPLAY_BOX_ALPHA: f32 = 0.0;
 const ENEMY_DEFAULT_VELOCITY_RESPONSE_HZ: f32 = 8.5;
-const ENEMY_WALKER_VELOCITY_RESPONSE_HZ: f32 = 14.0;
-const ENEMY_CHARGER_VELOCITY_RESPONSE_HZ: f32 = 16.0;
+const ENEMY_WALKER_VELOCITY_RESPONSE_HZ: f32 = 20.0;
+const ENEMY_CHARGER_VELOCITY_RESPONSE_HZ: f32 = 24.0;
 const ENEMY_BOMBER_VELOCITY_RESPONSE_HZ: f32 = 10.0;
+const ENEMY_WALKER_UPHILL_SPEED_BOOST: f32 = 1.35;
+const ENEMY_CHARGER_UPHILL_SPEED_BOOST: f32 = 1.5;
+const ENEMY_WALKER_GROUND_FOLLOW_RATE: f32 = 18.0;
+const ENEMY_CHARGER_GROUND_FOLLOW_RATE: f32 = 20.0;
 
 pub struct EnemyGameplayPlugin;
 
@@ -585,10 +589,15 @@ fn update_enemy_behaviors(
             EnemyBehaviorKind::Walker => {
                 let ground_tangent = terrain_tangent_at_x(&config, enemy_position.x);
                 let ground_y = terrain_height_at_x(&config, enemy_position.x) + ground_offset;
-                let along_ground = -ground_tangent * motion.base_speed_mps;
+                let climb_boost = if -ground_tangent.y > 0.0 {
+                    ENEMY_WALKER_UPHILL_SPEED_BOOST
+                } else {
+                    1.0
+                };
+                let along_ground = -ground_tangent * (motion.base_speed_mps * climb_boost);
                 desired_velocity.x = along_ground.x;
-                desired_velocity.y =
-                    along_ground.y + ((ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE);
+                desired_velocity.y = along_ground.y
+                    + ((ground_y - enemy_position.y) * ENEMY_WALKER_GROUND_FOLLOW_RATE);
                 transform.rotation =
                     Quat::from_rotation_z(ground_tangent.y.atan2(ground_tangent.x));
             }
@@ -615,10 +624,16 @@ fn update_enemy_behaviors(
                 };
                 let ground_tangent = terrain_tangent_at_x(&config, enemy_position.x);
                 let ground_y = terrain_height_at_x(&config, enemy_position.x) + ground_offset;
-                let along_ground = -ground_tangent * (motion.base_speed_mps * charge_multiplier);
+                let climb_boost = if -ground_tangent.y > 0.0 {
+                    ENEMY_CHARGER_UPHILL_SPEED_BOOST
+                } else {
+                    1.0
+                };
+                let along_ground =
+                    -ground_tangent * (motion.base_speed_mps * charge_multiplier * climb_boost);
                 desired_velocity.x = along_ground.x;
-                desired_velocity.y =
-                    along_ground.y + ((ground_y - enemy_position.y) * GROUND_FOLLOW_SNAP_RATE);
+                desired_velocity.y = along_ground.y
+                    + ((ground_y - enemy_position.y) * ENEMY_CHARGER_GROUND_FOLLOW_RATE);
                 transform.rotation =
                     Quat::from_rotation_z(ground_tangent.y.atan2(ground_tangent.x));
             }
@@ -722,7 +737,7 @@ fn fire_enemy_projectiles(
             continue;
         }
 
-        let aim_direction = to_player.normalize_or_zero();
+        let aim_direction = clamp_enemy_fire_direction(to_player.normalize_or_zero());
         let muzzle_forward = hitbox.radius_m + weapon.muzzle_offset_x.max(0.0);
         let muzzle_world = enemy_position
             + (aim_direction * muzzle_forward)
@@ -743,7 +758,8 @@ fn fire_enemy_projectiles(
                     next_signed_unit_random(&mut attack_state.rng_state) * spread_half_angle_rad;
                 let shot_angle =
                     aim_direction.y.atan2(aim_direction.x) + behavior_offset + random_spread;
-                let shot_direction_world = Vec2::from_angle(shot_angle).normalize_or_zero();
+                let shot_direction_world =
+                    clamp_enemy_fire_direction(Vec2::from_angle(shot_angle).normalize_or_zero());
 
                 if shot_direction_world.length_squared() <= f32::EPSILON {
                     continue;
@@ -762,6 +778,27 @@ fn fire_enemy_projectiles(
         let burst_extension_s =
             weapon.burst_interval_seconds.max(0.0) * burst_count.saturating_sub(1) as f32;
         attack_state.cooldown_s = fire_cooldown_s + burst_extension_s;
+    }
+}
+
+fn clamp_enemy_fire_direction(direction: Vec2) -> Vec2 {
+    let mut dir = if direction.length_squared() > f32::EPSILON {
+        direction.normalize()
+    } else {
+        Vec2::NEG_X
+    };
+
+    if dir.x > 0.0 {
+        dir.x = 0.0;
+        if dir.y < 0.15 {
+            dir.y = 0.15;
+        }
+    }
+
+    if dir.length_squared() > f32::EPSILON {
+        dir.normalize()
+    } else {
+        Vec2::Y
     }
 }
 

@@ -3,11 +3,12 @@ use crate::gameplay::pickups::{PickupCollectedEvent, PickupKind};
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
 use bevy::prelude::*;
-use bevy::time::Virtual;
+use bevy::time::{Real, Virtual};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_VISIBLE_UPGRADE_CHOICES: usize = 2;
+const UPGRADE_SELECTION_CONFIRM_SECONDS: f32 = 0.4;
 
 pub struct UpgradeGameplayPlugin;
 
@@ -33,6 +34,7 @@ impl Plugin for UpgradeGameplayPlugin {
                     track_coin_progress_and_open_offer,
                     sync_upgrade_pause_time,
                     handle_upgrade_offer_input,
+                    update_upgrade_selection_confirmation,
                     update_upgrade_offer_ui,
                 )
                     .chain()
@@ -81,12 +83,19 @@ struct PendingUpgradeOffer {
     choices: Vec<UpgradeOfferChoice>,
 }
 
+#[derive(Debug, Clone)]
+struct UpgradeSelectionConfirmation {
+    selected_index: usize,
+    remaining_s: f32,
+}
+
 #[derive(Resource, Debug, Clone)]
 struct UpgradeProgressState {
     total_coin_pickups: u32,
     next_offer_coin_threshold: u32,
     stack_counts: HashMap<String, u32>,
     pending_offer: Option<PendingUpgradeOffer>,
+    selection_confirmation: Option<UpgradeSelectionConfirmation>,
     wait_for_fresh_selection_input: bool,
     rng_state: u64,
 }
@@ -98,6 +107,7 @@ impl Default for UpgradeProgressState {
             next_offer_coin_threshold: 5,
             stack_counts: HashMap::new(),
             pending_offer: None,
+            selection_confirmation: None,
             wait_for_fresh_selection_input: false,
             rng_state: 0xD94A_4B53_9E13_BC87,
         }
@@ -264,7 +274,7 @@ fn track_coin_progress_and_open_offer(
 }
 
 fn sync_upgrade_pause_time(state: Res<UpgradeProgressState>, mut time: ResMut<Time<Virtual>>) {
-    let target_speed = if state.pending_offer.is_some() {
+    let target_speed = if state.pending_offer.is_some() || state.selection_confirmation.is_some() {
         0.0
     } else {
         1.0
@@ -284,6 +294,10 @@ fn handle_upgrade_offer_input(
     mut player_query: Query<&mut PlayerHealth, With<PlayerVehicle>>,
     mut applied_events: MessageWriter<UpgradeAppliedEvent>,
 ) {
+    if state.selection_confirmation.is_some() {
+        return;
+    }
+
     let Some(offer) = state.pending_offer.clone() else {
         state.wait_for_fresh_selection_input = false;
         return;
@@ -314,8 +328,11 @@ fn handle_upgrade_offer_input(
         Ok(effect_summary) => {
             let stack = current_stacks.saturating_add(1);
             state.stack_counts.insert(choice.id.clone(), stack);
-            state.pending_offer = None;
             state.wait_for_fresh_selection_input = false;
+            state.selection_confirmation = Some(UpgradeSelectionConfirmation {
+                selected_index,
+                remaining_s: UPGRADE_SELECTION_CONFIRM_SECONDS,
+            });
             info!(
                 "Applied upgrade `{}` (stack {stack}/{}): {}",
                 choice.label, choice.max_stacks, effect_summary
@@ -333,11 +350,35 @@ fn handle_upgrade_offer_input(
     }
 }
 
+fn update_upgrade_selection_confirmation(
+    time: Res<Time<Real>>,
+    mut state: ResMut<UpgradeProgressState>,
+) {
+    let Some(confirm) = state.selection_confirmation.as_mut() else {
+        return;
+    };
+
+    confirm.remaining_s -= time.delta_secs();
+    if confirm.remaining_s <= 0.0 {
+        state.selection_confirmation = None;
+        state.pending_offer = None;
+        state.wait_for_fresh_selection_input = false;
+    }
+}
+
 fn update_upgrade_offer_ui(
     state: Res<UpgradeProgressState>,
     mut root_query: Query<&mut Visibility, With<UpgradeOfferRoot>>,
     mut header_query: Query<&mut Text, With<UpgradeOfferHeaderText>>,
-    mut card_query: Query<(&UpgradeOfferCardSlot, &mut Visibility), Without<UpgradeOfferRoot>>,
+    mut card_query: Query<
+        (
+            &UpgradeOfferCardSlot,
+            &mut Visibility,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        Without<UpgradeOfferRoot>,
+    >,
     mut card_text_query: Query<
         (&UpgradeOfferCardTextSlot, &mut Text),
         Without<UpgradeOfferHeaderText>,
@@ -356,17 +397,35 @@ fn update_upgrade_offer_ui(
     };
 
     *root_visibility = Visibility::Inherited;
+    let selected_slot = state
+        .selection_confirmation
+        .as_ref()
+        .map(|confirm| confirm.selected_index);
     *header = Text::new(format!(
         "Choose Upgrade (game paused)\nPress A/D or Left/Right    Coins: {}    Next Offer: {}",
         state.total_coin_pickups, state.next_offer_coin_threshold
     ));
 
-    for (slot, mut visibility) in &mut card_query {
+    for (slot, mut visibility, mut bg, mut border) in &mut card_query {
         *visibility = if slot.slot < offer.choices.len() {
             Visibility::Inherited
         } else {
             Visibility::Hidden
         };
+        if *visibility == Visibility::Hidden {
+            continue;
+        }
+
+        if Some(slot.slot) == selected_slot {
+            *bg = BackgroundColor(Color::srgba(0.24, 0.35, 0.22, 0.98));
+            *border = BorderColor::all(Color::srgba(0.68, 0.96, 0.52, 0.98));
+        } else if selected_slot.is_some() {
+            *bg = BackgroundColor(Color::srgba(0.11, 0.14, 0.17, 0.82));
+            *border = BorderColor::all(Color::srgba(0.28, 0.34, 0.38, 0.75));
+        } else {
+            *bg = BackgroundColor(Color::srgba(0.13, 0.17, 0.22, 0.98));
+            *border = BorderColor::all(Color::srgba(0.56, 0.66, 0.74, 0.95));
+        }
     }
 
     for (slot, mut text) in &mut card_text_query {
