@@ -1,4 +1,4 @@
-use crate::config::{BackgroundConfig, GameConfig, TerrainConfig, VehicleConfig};
+use crate::config::{BackgroundConfig, GameConfig, SfxConfig, TerrainConfig, VehicleConfig};
 use crate::gameplay::vehicle::{
     PlayerVehicle, VehicleInputState, VehicleStuntMetrics, VehicleTelemetry,
 };
@@ -15,14 +15,19 @@ impl Plugin for DebugOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DebugRunStats>()
             .init_resource::<KeybindOverlayState>()
+            .init_resource::<DebugTextOverlayState>()
             .init_resource::<DebugGameplayGuards>()
             .init_resource::<DebugCameraPanState>()
             .init_resource::<VehicleTuningPanelState>()
             .init_resource::<BackgroundTuningPanelState>()
+            .init_resource::<AudioTuningPanelState>()
             .add_systems(Update, spawn_debug_overlay)
+            .add_systems(Update, toggle_debug_text_overlay)
             .add_systems(Update, toggle_keybind_overlay)
             .add_systems(Update, toggle_vehicle_tuning_panel)
             .add_systems(Update, toggle_background_tuning_panel)
+            .add_systems(Update, toggle_audio_tuning_panel)
+            .add_systems(Update, sync_debug_overlay_visibility)
             .add_systems(Update, sync_keybind_overlay_visibility)
             .add_systems(OnEnter(GameState::InRun), reset_run_stats)
             .add_systems(
@@ -39,7 +44,11 @@ impl Plugin for DebugOverlayPlugin {
             )
             .add_systems(
                 EguiPrimaryContextPass,
-                (vehicle_tuning_panel_ui, background_tuning_panel_ui)
+                (
+                    vehicle_tuning_panel_ui,
+                    background_tuning_panel_ui,
+                    audio_tuning_panel_ui,
+                )
                     .run_if(in_state(GameState::InRun))
                     .run_if(resource_exists::<GameConfig>),
             );
@@ -89,6 +98,17 @@ impl Default for DebugRunStats {
 #[derive(Resource, Debug, Clone, Default)]
 struct KeybindOverlayState {
     visible: bool,
+}
+
+#[derive(Resource, Debug, Clone)]
+struct DebugTextOverlayState {
+    visible: bool,
+}
+
+impl Default for DebugTextOverlayState {
+    fn default() -> Self {
+        Self { visible: true }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -258,9 +278,58 @@ struct BackgroundTuningPanelState {
     status: String,
 }
 
+#[derive(Debug, Clone)]
+struct AudioTuningParams {
+    master_volume: f32,
+    music_volume: f32,
+    engine_volume: f32,
+    gun_shot_volume: f32,
+    gun_hit_volume: f32,
+    gun_miss_volume: f32,
+    missile_launch_volume: f32,
+    missile_hit_volume: f32,
+    explode_volume: f32,
+}
+
+impl AudioTuningParams {
+    fn from_sfx(sfx: &SfxConfig) -> Self {
+        Self {
+            master_volume: sfx.master_volume,
+            music_volume: sfx.music_volume,
+            engine_volume: sfx.engine_volume,
+            gun_shot_volume: sfx.gun_shot_volume,
+            gun_hit_volume: sfx.gun_hit_volume,
+            gun_miss_volume: sfx.gun_miss_volume,
+            missile_launch_volume: sfx.missile_launch_volume,
+            missile_hit_volume: sfx.missile_hit_volume,
+            explode_volume: sfx.explode_volume,
+        }
+    }
+
+    fn apply_to_sfx(&self, sfx: &mut SfxConfig) {
+        sfx.master_volume = self.master_volume;
+        sfx.music_volume = self.music_volume;
+        sfx.engine_volume = self.engine_volume;
+        sfx.gun_shot_volume = self.gun_shot_volume;
+        sfx.gun_hit_volume = self.gun_hit_volume;
+        sfx.gun_miss_volume = self.gun_miss_volume;
+        sfx.missile_launch_volume = self.missile_launch_volume;
+        sfx.missile_hit_volume = self.missile_hit_volume;
+        sfx.explode_volume = self.explode_volume;
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+struct AudioTuningPanelState {
+    visible: bool,
+    params: Option<AudioTuningParams>,
+    status: String,
+}
+
 fn spawn_debug_overlay(
     mut commands: Commands,
     keybind_overlay: Res<KeybindOverlayState>,
+    debug_text_overlay: Res<DebugTextOverlayState>,
     config: Option<Res<GameConfig>>,
     existing_overlay: Query<Entity, With<DebugOverlayText>>,
 ) {
@@ -294,6 +363,11 @@ fn spawn_debug_overlay(
             border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
+        if debug_text_overlay.visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        },
         ZIndex(100),
     ));
 
@@ -315,7 +389,7 @@ fn spawn_debug_overlay(
             border: UiRect::all(Val::Px(1.0)),
             ..default()
         },
-        if keybind_overlay.visible {
+        if debug_text_overlay.visible && keybind_overlay.visible {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -373,7 +447,7 @@ fn update_debug_camera_pan(
     }
 
     let mut axis = 0.0_f32;
-    if keyboard.pressed(KeyCode::KeyO) {
+    if keyboard.pressed(KeyCode::KeyI) {
         axis -= 1.0;
     }
     if keyboard.pressed(KeyCode::KeyP) {
@@ -396,8 +470,13 @@ fn update_debug_overlay_text(
     input_state: Option<Res<VehicleInputState>>,
     stunts: Option<Res<VehicleStuntMetrics>>,
     camera_pan: Res<DebugCameraPanState>,
+    debug_text_overlay: Res<DebugTextOverlayState>,
     mut overlay_query: Query<&mut Text, With<DebugOverlayText>>,
 ) {
+    if !debug_text_overlay.visible {
+        return;
+    }
+
     let Ok(mut text) = overlay_query.single_mut() else {
         return;
     };
@@ -474,15 +553,57 @@ fn toggle_keybind_overlay(
     }
 }
 
-fn sync_keybind_overlay_visibility(
-    state: Res<KeybindOverlayState>,
-    mut query: Query<&mut Visibility, With<KeybindOverlayText>>,
+fn toggle_debug_text_overlay(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut state: ResMut<DebugTextOverlayState>,
+    config: Option<Res<GameConfig>>,
+) {
+    let Some(config) = config else {
+        return;
+    };
+
+    if !config.game.app.debug_overlay {
+        return;
+    }
+
+    if keyboard.just_pressed(KeyCode::KeyO) {
+        state.visible = !state.visible;
+        info!(
+            "Debug text overlays {}.",
+            if state.visible { "shown" } else { "hidden" }
+        );
+    }
+}
+
+fn sync_debug_overlay_visibility(
+    state: Res<DebugTextOverlayState>,
+    mut query: Query<&mut Visibility, With<DebugOverlayText>>,
 ) {
     if !state.is_changed() {
         return;
     }
 
     let next_visibility = if state.visible {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+
+    for mut visibility in &mut query {
+        *visibility = next_visibility;
+    }
+}
+
+fn sync_keybind_overlay_visibility(
+    state: Res<KeybindOverlayState>,
+    debug_text_overlay: Res<DebugTextOverlayState>,
+    mut query: Query<&mut Visibility, With<KeybindOverlayText>>,
+) {
+    if !state.is_changed() && !debug_text_overlay.is_changed() {
+        return;
+    }
+
+    let next_visibility = if debug_text_overlay.visible && state.visible {
         Visibility::Inherited
     } else {
         Visibility::Hidden
@@ -539,6 +660,28 @@ fn toggle_background_tuning_panel(
         info!("Background tuning panel shown.");
     } else {
         info!("Background tuning panel hidden.");
+    }
+}
+
+fn toggle_audio_tuning_panel(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut panel_state: ResMut<AudioTuningPanelState>,
+    config: Option<Res<GameConfig>>,
+) {
+    if !keyboard.just_pressed(KeyCode::KeyM) {
+        return;
+    }
+
+    panel_state.visible = !panel_state.visible;
+    if panel_state.visible {
+        if let Some(config) = config {
+            if let Err(error) = sync_audio_panel_state_from_config(&mut panel_state, &config) {
+                panel_state.status = error;
+            }
+        }
+        info!("Audio tuning panel shown.");
+    } else {
+        info!("Audio tuning panel hidden.");
     }
 }
 
@@ -1016,6 +1159,156 @@ fn background_tuning_panel_ui(
     }
 }
 
+fn audio_tuning_panel_ui(
+    mut egui_contexts: EguiContexts,
+    mut panel_state: ResMut<AudioTuningPanelState>,
+    mut config: ResMut<GameConfig>,
+) {
+    if !panel_state.visible {
+        return;
+    }
+
+    if panel_state.params.is_none() {
+        if let Err(error) = sync_audio_panel_state_from_config(&mut panel_state, &config) {
+            panel_state.status = error;
+            return;
+        }
+    }
+
+    let Some(mut params) = panel_state.params.clone() else {
+        return;
+    };
+
+    let mut window_open = panel_state.visible;
+    let mut params_changed = false;
+    let mut reload_clicked = false;
+    let mut apply_clicked = false;
+    let status = panel_state.status.clone();
+
+    let Ok(ctx) = egui_contexts.ctx_mut() else {
+        return;
+    };
+    egui::Window::new("Audio Mix Tuning")
+        .open(&mut window_open)
+        .resizable(true)
+        .default_width(560.0)
+        .show(ctx, |ui| {
+            ui.label("Live-tune SFX/music levels with sliders and numeric fields.");
+            ui.separator();
+
+            params_changed |= tuning_slider_row(
+                ui,
+                "master_volume",
+                &mut params.master_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "music_volume",
+                &mut params.music_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "engine_volume",
+                &mut params.engine_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "gun_shot_volume",
+                &mut params.gun_shot_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "gun_hit_volume",
+                &mut params.gun_hit_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "gun_miss_volume",
+                &mut params.gun_miss_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "missile_launch_volume",
+                &mut params.missile_launch_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "missile_hit_volume",
+                &mut params.missile_hit_volume,
+                0.0..=2.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "explode_volume",
+                &mut params.explode_volume,
+                0.0..=2.0,
+                0.01,
+            );
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("Reload From Config").clicked() {
+                    reload_clicked = true;
+                }
+                if ui.button("Apply To game.toml").clicked() {
+                    apply_clicked = true;
+                }
+            });
+
+            if !status.is_empty() {
+                ui.separator();
+                ui.label(status);
+            }
+        });
+
+    panel_state.visible = window_open;
+
+    if reload_clicked {
+        match sync_audio_panel_state_from_config(&mut panel_state, &config) {
+            Ok(()) => panel_state.status = "Reloaded values from current config.".to_string(),
+            Err(error) => panel_state.status = error,
+        }
+        return;
+    }
+
+    panel_state.params = Some(params.clone());
+
+    if params_changed {
+        if let Err(error) = apply_audio_tuning_to_runtime_config(&mut config, &params) {
+            panel_state.status = error;
+        } else {
+            panel_state.status = "Live-tuning active (in-memory config updated).".to_string();
+        }
+    }
+
+    if apply_clicked {
+        match persist_audio_tuning_and_reload(&mut config, &params) {
+            Ok(message) => {
+                panel_state.status = message;
+                if let Err(error) = sync_audio_panel_state_from_config(&mut panel_state, &config) {
+                    panel_state.status = error;
+                }
+            }
+            Err(error) => panel_state.status = error,
+        }
+    }
+}
+
 fn tuning_slider_row(
     ui: &mut egui::Ui,
     label: &str,
@@ -1096,6 +1389,45 @@ fn sync_background_panel_state_from_config(
     Ok(())
 }
 
+fn sync_audio_panel_state_from_config(
+    panel_state: &mut AudioTuningPanelState,
+    config: &GameConfig,
+) -> Result<(), String> {
+    if !config.game.sfx.master_volume.is_finite() {
+        return Err("Audio tuning panel: invalid `sfx.master_volume` value.".to_string());
+    }
+
+    panel_state.params = Some(AudioTuningParams::from_sfx(&config.game.sfx));
+    Ok(())
+}
+
+fn apply_audio_tuning_to_runtime_config(
+    config: &mut GameConfig,
+    params: &AudioTuningParams,
+) -> Result<(), String> {
+    for (label, value) in [
+        ("master_volume", params.master_volume),
+        ("music_volume", params.music_volume),
+        ("engine_volume", params.engine_volume),
+        ("gun_shot_volume", params.gun_shot_volume),
+        ("gun_hit_volume", params.gun_hit_volume),
+        ("gun_miss_volume", params.gun_miss_volume),
+        ("missile_launch_volume", params.missile_launch_volume),
+        ("missile_hit_volume", params.missile_hit_volume),
+        ("explode_volume", params.explode_volume),
+    ] {
+        if !value.is_finite() {
+            return Err(format!("Audio tuning panel: `{label}` must be finite."));
+        }
+        if value < 0.0 {
+            return Err(format!("Audio tuning panel: `{label}` must be >= 0."));
+        }
+    }
+
+    params.apply_to_sfx(&mut config.game.sfx);
+    Ok(())
+}
+
 fn apply_vehicle_tuning_to_runtime_config(
     config: &mut GameConfig,
     vehicle_id: &str,
@@ -1148,6 +1480,44 @@ fn apply_background_tuning_to_runtime_config(
     };
     params.apply_to_background(background);
     Ok(())
+}
+
+fn persist_audio_tuning_and_reload(
+    config: &mut GameConfig,
+    params: &AudioTuningParams,
+) -> Result<String, String> {
+    let game_path = Path::new("config").join("game.toml");
+    let original_game_raw = fs::read_to_string(&game_path)
+        .map_err(|error| format!("Failed reading `{}`: {error}", game_path.display()))?;
+    let mut game_root: toml::Value = toml::from_str(&original_game_raw)
+        .map_err(|error| format!("Failed parsing `{}`: {error}", game_path.display()))?;
+
+    write_sfx_params_to_game_toml_value(&mut game_root, params)?;
+
+    let updated_game_raw = toml::to_string_pretty(&game_root)
+        .map_err(|error| format!("Failed serializing game TOML: {error}"))?;
+    fs::write(&game_path, updated_game_raw)
+        .map_err(|error| format!("Failed writing `{}`: {error}", game_path.display()))?;
+
+    match GameConfig::load_from_dir(Path::new("config")) {
+        Ok(new_config) => {
+            *config = new_config;
+            Ok(format!(
+                "Applied audio tuning and saved to {}.",
+                game_path.to_string_lossy()
+            ))
+        }
+        Err(error) => {
+            let _ = fs::write(&game_path, original_game_raw);
+            if let Ok(restored) = GameConfig::load_from_dir(Path::new("config")) {
+                *config = restored;
+            }
+            Err(format!(
+                "Apply failed validation: {error}. Reverted `{}`.",
+                game_path.display()
+            ))
+        }
+    }
 }
 
 fn persist_vehicle_tuning_and_reload(
@@ -1426,6 +1796,30 @@ fn write_terrain_params_to_game_toml_value(
     Ok(())
 }
 
+fn write_sfx_params_to_game_toml_value(
+    root: &mut toml::Value,
+    params: &AudioTuningParams,
+) -> Result<(), String> {
+    let Some(sfx_table) = root.get_mut("sfx").and_then(toml::Value::as_table_mut) else {
+        return Err("game.toml: missing or invalid `sfx` table".to_string());
+    };
+
+    set_toml_float(sfx_table, "master_volume", params.master_volume)?;
+    set_toml_float(sfx_table, "music_volume", params.music_volume)?;
+    set_toml_float(sfx_table, "engine_volume", params.engine_volume)?;
+    set_toml_float(sfx_table, "gun_shot_volume", params.gun_shot_volume)?;
+    set_toml_float(sfx_table, "gun_hit_volume", params.gun_hit_volume)?;
+    set_toml_float(sfx_table, "gun_miss_volume", params.gun_miss_volume)?;
+    set_toml_float(
+        sfx_table,
+        "missile_launch_volume",
+        params.missile_launch_volume,
+    )?;
+    set_toml_float(sfx_table, "missile_hit_volume", params.missile_hit_volume)?;
+    set_toml_float(sfx_table, "explode_volume", params.explode_volume)?;
+    Ok(())
+}
+
 fn set_toml_float(
     table: &mut toml::map::Map<String, toml::Value>,
     key: &str,
@@ -1442,9 +1836,11 @@ fn set_toml_float(
 fn keybind_overlay_text() -> &'static str {
     "Keybinds\n\
 H - Toggle this panel\n\
+O - Toggle debug text overlays\n\
 V - Toggle vehicle tuning panel\n\
 B - Toggle background tuning panel\n\
-O / P - Pan camera left / right\n\
+M - Toggle audio tuning panel\n\
+I / P - Pan camera left / right\n\
 A/D or Left/Right - Choose upgrade option (when shown)\n\
 F5 - Hot-reload config\n\
 D / Right - Accelerate\n\

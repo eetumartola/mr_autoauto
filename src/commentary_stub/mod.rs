@@ -668,11 +668,18 @@ fn prepare_narration_audio_bytes(mut bytes: Vec<u8>) -> Result<Vec<u8>, String> 
         return Ok(bytes);
     }
 
-    if bytes.starts_with(b"OggS")
-        || bytes.starts_with(b"ID3")
-        || (bytes[0] == 0xFF && (bytes[1] & 0b1110_0000) == 0b1110_0000)
-    {
-        return Ok(bytes);
+    if bytes.starts_with(b"OggS") {
+        return Err(
+            "received OGG narration payload; expected WAV. Set Neocortex audio format to `wav`."
+                .to_string(),
+        );
+    }
+
+    if bytes.starts_with(b"ID3") || (bytes[0] == 0xFF && (bytes[1] & 0b1110_0000) == 0b1110_0000) {
+        return Err(
+            "received MP3 narration payload; expected WAV. Set Neocortex audio format to `wav`."
+                .to_string(),
+        );
     }
 
     Err(format!(

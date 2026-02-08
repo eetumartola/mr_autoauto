@@ -41,6 +41,31 @@ pub struct EnemyKilledEvent {
     pub world_position: Vec2,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerProjectileAudioKind {
+    Bullet,
+    Missile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlayerProjectileImpactTarget {
+    Ground,
+    Enemy,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PlayerWeaponFiredEvent {
+    pub kind: PlayerProjectileAudioKind,
+    pub world_position: Vec2,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct PlayerProjectileImpactEvent {
+    pub kind: PlayerProjectileAudioKind,
+    pub target: PlayerProjectileImpactTarget,
+    pub world_position: Vec2,
+}
+
 pub struct CombatGameplayPlugin;
 
 impl Plugin for CombatGameplayPlugin {
@@ -48,6 +73,8 @@ impl Plugin for CombatGameplayPlugin {
         app.init_resource::<TurretTargetingState>()
             .init_resource::<TurretFireState>()
             .add_message::<EnemyKilledEvent>()
+            .add_message::<PlayerWeaponFiredEvent>()
+            .add_message::<PlayerProjectileImpactEvent>()
             .add_systems(
                 OnEnter(GameState::InRun),
                 (reset_turret_targeting_state, reset_turret_fire_state),
@@ -325,6 +352,7 @@ fn fire_turret_projectiles(
     targeting: Res<TurretTargetingState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
     mut fire_state: ResMut<TurretFireState>,
+    mut fired_events: MessageWriter<PlayerWeaponFiredEvent>,
 ) {
     if targeting.target_entity.is_none() {
         fire_state.burst_shots_remaining = 0;
@@ -382,6 +410,7 @@ fn fire_turret_projectiles(
 
         spawn_player_projectile(
             &mut commands,
+            &mut fired_events,
             primary_weapon,
             shot_direction_world,
             turret_origin_world,
@@ -405,6 +434,7 @@ fn fire_turret_projectiles(
                 if missile_direction_world.length_squared() > f32::EPSILON {
                     spawn_player_projectile(
                         &mut commands,
+                        &mut fired_events,
                         secondary_weapon,
                         missile_direction_world,
                         turret_origin_world,
@@ -461,6 +491,7 @@ fn simulate_player_projectiles(
     config: Res<GameConfig>,
     enemy_query: Query<&Transform, (With<Enemy>, Without<PlayerProjectile>)>,
     mut projectile_query: Query<(Entity, &mut Transform, &mut PlayerProjectile), Without<Enemy>>,
+    mut impact_events: MessageWriter<PlayerProjectileImpactEvent>,
 ) {
     let Some(environment) = config
         .environments_by_id
@@ -510,6 +541,11 @@ fn simulate_player_projectiles(
         if transform.translation.y <= ground_y {
             let impact_position = Vec2::new(transform.translation.x, ground_y);
             spawn_impact_fx(&mut commands, impact_position, projectile.kind);
+            impact_events.write(PlayerProjectileImpactEvent {
+                kind: projectile_kind_for_audio(projectile.kind),
+                target: PlayerProjectileImpactTarget::Ground,
+                world_position: impact_position,
+            });
             if projectile.kind == PlayerProjectileKind::Missile {
                 spawn_explosion_fx(&mut commands, impact_position);
             }
@@ -540,6 +576,7 @@ fn resolve_player_projectile_enemy_hits(
         With<Enemy>,
     >,
     mut killed_message_writer: MessageWriter<EnemyKilledEvent>,
+    mut impact_events: MessageWriter<PlayerProjectileImpactEvent>,
 ) {
     let projectile_snapshots: Vec<(Entity, Vec2, f32, PlayerProjectileKind)> = projectile_query
         .iter()
@@ -611,6 +648,11 @@ fn resolve_player_projectile_enemy_hits(
 
     for (position, projectile_kind) in impact_fx_positions {
         spawn_impact_fx(&mut commands, position, projectile_kind);
+        impact_events.write(PlayerProjectileImpactEvent {
+            kind: projectile_kind_for_audio(projectile_kind),
+            target: PlayerProjectileImpactTarget::Enemy,
+            world_position: position,
+        });
     }
 
     for position in explosion_fx_positions {
@@ -695,6 +737,7 @@ fn shortest_angle_delta_rad(target: f32, current: f32) -> f32 {
 
 fn spawn_player_projectile(
     commands: &mut Commands,
+    fired_events: &mut MessageWriter<PlayerWeaponFiredEvent>,
     weapon: &crate::config::WeaponConfig,
     shot_direction_world: Vec2,
     turret_origin_world: Vec2,
@@ -731,6 +774,10 @@ fn spawn_player_projectile(
         projectile_color.with_alpha(0.9),
         MUZZLE_FLASH_LIFETIME_S,
     );
+    fired_events.write(PlayerWeaponFiredEvent {
+        kind: projectile_kind_for_audio(projectile_kind),
+        world_position: muzzle_world,
+    });
 
     let projectile_entity = commands
         .spawn((
@@ -784,6 +831,13 @@ fn spawn_player_projectile(
             ));
         }
     });
+}
+
+fn projectile_kind_for_audio(kind: PlayerProjectileKind) -> PlayerProjectileAudioKind {
+    match kind {
+        PlayerProjectileKind::Bullet => PlayerProjectileAudioKind::Bullet,
+        PlayerProjectileKind::Missile => PlayerProjectileAudioKind::Missile,
+    }
 }
 
 fn spawn_impact_fx(commands: &mut Commands, world_position: Vec2, kind: PlayerProjectileKind) {

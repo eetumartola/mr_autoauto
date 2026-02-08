@@ -27,6 +27,9 @@ const ENEMY_FLIER_ARC_ANGLE_RAD: f32 = 0.28;
 const ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD: f32 = 0.16;
 const ENEMY_BOMBER_ALTITUDE_SCALE: f32 = 1.5;
 const ENEMY_BOMBER_ALTITUDE_DEFAULT_M: f32 = 10.0;
+const ENEMY_BOMBER_CRUISE_WAVE_FREQUENCY_HZ: f32 = 0.22;
+const ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_FACTOR: f32 = 0.2;
+const ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_MAX_M: f32 = 2.2;
 const ENEMY_PROJECTILE_Z_M: f32 = 2.0;
 const ENEMY_BULLET_LENGTH_M: f32 = 0.42;
 const ENEMY_BULLET_THICKNESS_M: f32 = 0.10;
@@ -48,6 +51,11 @@ const MIN_ENEMY_FIRE_COOLDOWN_S: f32 = 0.12;
 const ENEMY_MASS_PER_RADIUS_SQUARED: f32 = 18.0;
 const ENEMY_MIN_MASS: f32 = 2.4;
 const ENEMY_MODEL_LOCAL_Z_M: f32 = 0.24;
+const ENEMY_GAMEPLAY_BOX_ALPHA: f32 = 0.0;
+const ENEMY_DEFAULT_VELOCITY_RESPONSE_HZ: f32 = 8.5;
+const ENEMY_WALKER_VELOCITY_RESPONSE_HZ: f32 = 14.0;
+const ENEMY_CHARGER_VELOCITY_RESPONSE_HZ: f32 = 16.0;
+const ENEMY_BOMBER_VELOCITY_RESPONSE_HZ: f32 = 10.0;
 
 pub struct EnemyGameplayPlugin;
 
@@ -335,6 +343,7 @@ fn spawn_enemy_instance(
         EnemyBehaviorKind::Flier | EnemyBehaviorKind::Bomber => 0.0,
         _ => 1.0,
     };
+    let gameplay_box_color = body_color.with_alpha(ENEMY_GAMEPLAY_BOX_ALPHA);
 
     let enemy_entity = commands
         .spawn((
@@ -342,7 +351,7 @@ fn spawn_enemy_instance(
             Enemy,
             EnemyDebugMarker,
             EnemyTypeId(enemy_cfg.id.clone()),
-            EnemyBaseColor(body_color),
+            EnemyBaseColor(gameplay_box_color),
             EnemyHealth {
                 current: enemy_cfg.health,
                 max: enemy_cfg.health,
@@ -366,7 +375,7 @@ fn spawn_enemy_instance(
                 cooldown_s: 0.35 + ((sequence as f32 * 0.17).rem_euclid(0.8)),
                 rng_state: 0xD8E5_3A1C_9F2B_4D11 ^ sequence as u64 ^ (enemy_cfg.id.len() as u64),
             },
-            Sprite::from_color(body_color, body_size),
+            Sprite::from_color(gameplay_box_color, body_size),
             Transform::from_xyz(spawn_x, start_y, 8.0),
         ))
         .insert((
@@ -615,11 +624,26 @@ fn update_enemy_behaviors(
             }
             EnemyBehaviorKind::Bomber => {
                 desired_velocity.x = -(motion.base_speed_mps * 0.95);
-                desired_velocity.y = (behavior.base_altitude_m - enemy_position.y) * 4.0;
+                let cruise_wave_amplitude = (behavior.hover_amplitude_m
+                    * ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_FACTOR)
+                    .clamp(0.5, ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_MAX_M);
+                let cruise_wave = ((behavior.elapsed_s * ENEMY_BOMBER_CRUISE_WAVE_FREQUENCY_HZ
+                    * TAU)
+                    + behavior.phase_offset_rad)
+                    .sin()
+                    * cruise_wave_amplitude;
+                let target_y = behavior.base_altitude_m + cruise_wave;
+                desired_velocity.y = (target_y - enemy_position.y) * 4.0;
             }
         }
 
-        let smooth = (8.5 * dt).clamp(0.0, 1.0);
+        let response_hz = match behavior.kind {
+            EnemyBehaviorKind::Walker => ENEMY_WALKER_VELOCITY_RESPONSE_HZ,
+            EnemyBehaviorKind::Charger => ENEMY_CHARGER_VELOCITY_RESPONSE_HZ,
+            EnemyBehaviorKind::Bomber => ENEMY_BOMBER_VELOCITY_RESPONSE_HZ,
+            _ => ENEMY_DEFAULT_VELOCITY_RESPONSE_HZ,
+        };
+        let smooth = (response_hz * dt).clamp(0.0, 1.0);
         velocity.linvel = velocity.linvel.lerp(desired_velocity, smooth);
         velocity.linvel.y = velocity.linvel.y.clamp(-40.0, 40.0);
         velocity.linvel.x = velocity.linvel.x.clamp(-90.0, 90.0);

@@ -81,3 +81,35 @@ path = "audio/sfx/enemy_shot.ogg"
 [[audio]]
 id = "sfx_hit"
 path = "audio/sfx/hit.ogg"
+
+[[audio]]
+id = "sfx_engine_loop"
+path = "audio/sfx/engine.wav"
+
+[[audio]]
+id = "sfx_explode"
+path = "audio/sfx/explode.wav"
+
+[[audio]]
+id = "sfx_gun_hit"
+path = "audio/sfx/gun_hit.wav"
+
+[[audio]]
+id = "sfx_gun_miss"
+path = "audio/sfx/gun_miss.wav"
+
+[[audio]]
+id = "sfx_gun_shot"
+path = "audio/sfx/gun_shot.wav"
+
+[[audio]]
+id = "sfx_missile_hit"
+path = "audio/sfx/missile_hit.wav"
+
+[[audio]]
+id = "sfx_missile_launch"
+path = "audio/sfx/missile_launch.wav"
+
+[[audio]]
+id = "music_background_loop"
+path = "audio/music.wav"

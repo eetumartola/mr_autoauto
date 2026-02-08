@@ -399,13 +399,18 @@ environment = "ice"
 - [in progress] H2. HUD: health, distance, speed, score, upgrade icons, current segment label.
   - [done] Added first-pass in-run HUD panel with score, HP bar, distance/speed, kills/coins, stunt totals, active segment, and live upgrade summary list.
   - [done] Converted old debug overlay into a compact diagnostics panel so gameplay HUD remains readable during tuning.
+  - [done] Added root `README.md` with setup/run instructions, controls, config map, optional Neocortex API env setup, and credits.
 - [done] H3. Hit indicators (directional damage, screen shake light):
   - edge damage indicators now flash by incoming hit direction (left/right/top/bottom).
   - light camera shake now reacts to incoming damage, enemy crashes, and hard landings.
 - [done] H4. Feedback polish:
   - muzzle flash, screen shake on big hits, dust on landing, coin pickup sparkle.
-- [not started] H5. Audio mix:
+- [in progress] H5. Audio mix:
   - music bed loop; mix levels; narration ducking.
+  - [done] Added gameplay SFX layer (engine loop + gun/missile shot/hit/miss + explosion) with configurable per-sound relative volumes in `game.toml::sfx`.
+  - [done] Added randomized pitch variation for one-shot SFX and subtle runtime pitch jitter for the engine loop.
+  - [done] Added looping background music (`assets/audio/music.wav`) with startup fade-in during loading/logo state and configurable `game.toml::sfx.music_volume`.
+  - [done] Added in-game audio tuning debug window (`M`) with live sliders + numeric fields for key volume parameters and Apply-to-`game.toml` persistence.
 - [not started] H6. Controller / touch affordances:
   - on-screen buttons + haptics (optional).
 
@@ -443,6 +448,7 @@ environment = "ice"
 - Runtime iteration workflow: `F5` hot-reloads config safely; invalid reloads are rejected without corrupting runtime state.
 - Controls baseline: keyboard `A/D` and `Left/Right` for brake/accel and in-air rotation.
 - Debug UX baseline: keybind help is hidden by default and toggled with `H`.
+- Debug text control: `O` toggles on-screen debug text overlays; debug camera pan uses `I/P`.
 - Live tuning workflow:
   - `V` vehicle tuning panel edits runtime values immediately.
   - `Apply` persists vehicle tuning back to `config/vehicles.toml`.
@@ -514,6 +520,7 @@ environment = "ice"
   - owl model overrides: force facing-left orientation; tower uses 2x visual scale and bomber uses 3x for first-pass readability.
   - hooked `beetle_rough.glb` for walker, `beetle_green.glb` for charger, and `bullfinch.glb` for flier via enemy-specific model IDs.
   - beetle/bullfinch model orientation now matches owl facing (left-facing in world space).
+  - physics/gameplay placeholder body boxes for player/enemies are kept in code but hidden by default to favor mesh readability.
   - charger and flier hitbox radii increased by 30% for clearer contact/collision behavior.
   - walker visual model scale set to 2.0x and flier (`bullfinch`) to 2.5x for readability.
 - Spawn pacing note:
@@ -524,11 +531,20 @@ environment = "ice"
   - increased wheel hardpoint spread and added stronger model-wheel foreground Z bias to keep tires visibly in front of chassis during gameplay.
 - Ground-follow behavior note:
   - walker and charger enemy movement now follows terrain tangent (velocity projected along slope) and aligns body rotation to ground angle to avoid uphill sticking.
+  - increased walker/charger velocity response (acceleration toward target velocity) so they can recover speed and climb slopes more reliably.
+  - bomber cruise path now includes a subtle sine-wave vertical motion instead of perfectly straight flight.
 - HUD polish note:
   - introduced a dedicated gameplay HUD overlay (`src/ui/mod.rs`) separate from debug diagnostics to keep play info readable while preserving tuning data.
+  - raised the world-space player HP bar offset slightly so it clears the turret more clearly.
 - Feedback polish note:
   - added a dedicated gameplay feedback layer (`src/gameplay/feedback/mod.rs`) for directional damage indicators, lightweight camera shake, landing dust particles, and pickup sparkle particles.
   - extended runtime events with world positions (`PlayerDamageEvent`, `PickupCollectedEvent`, `VehicleLandingEvent`) so UI/FX can react contextually.
+- Audio mix note:
+  - gameplay SFX now uses data-driven mix values under `game.toml::sfx` (master, per-sound relative volume, pitch random range, engine loop response/jitter).
+  - WAV-only audio pipeline for runtime playback: removed Bevy `mp3` decoding feature and now reject non-WAV Neocortex narration payloads to avoid demuxer false-positive crashes.
+  - SFX runtime loader now reads WAV bytes directly and normalizes malformed PCM `fmt` header fields (e.g., incorrect mono `byte_rate`) before playback to prevent Bevy decode panics.
+- Documentation note:
+  - `README.md` now renders the loading/logo image at the top for quick visual identity in the repository landing page.
 
 ---
 

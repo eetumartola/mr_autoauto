@@ -4,6 +4,26 @@ default_vehicle = "starter_car"
 fixed_timestep_hz = 60.0
 starting_environment = "normal"
 
+[sfx]
+enabled = true
+master_volume = 1.0
+music_volume = 0.42
+pitch_random_min = 0.94
+pitch_random_max = 1.06
+engine_volume = 0.32
+engine_base_speed = 0.82
+engine_accel_speed_boost = 0.56
+engine_velocity_speed_boost = 0.34
+engine_idle_gain = 0.30
+engine_load_gain = 0.68
+engine_pitch_jitter = 0.015
+gun_shot_volume = 0.30
+gun_hit_volume = 0.26
+gun_miss_volume = 0.18
+missile_launch_volume = 0.34
+missile_hit_volume = 0.32
+explode_volume = 0.40
+
 [pickups]
 bounce_damping = 0.28
 coin_jitter_x_m = 0.24

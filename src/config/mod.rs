@@ -671,6 +671,76 @@ impl GameConfig {
                 "game.toml::pickups jitter values must be >= 0".to_string(),
             ));
         }
+        if !self.game.sfx.master_volume.is_finite() || self.game.sfx.master_volume < 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.master_volume must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.sfx.pitch_random_min.is_finite()
+            || !self.game.sfx.pitch_random_max.is_finite()
+            || self.game.sfx.pitch_random_min <= 0.0
+            || self.game.sfx.pitch_random_max <= 0.0
+            || self.game.sfx.pitch_random_min > self.game.sfx.pitch_random_max
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx pitch random range is invalid".to_string(),
+            ));
+        }
+        if !self.game.sfx.engine_volume.is_finite() || self.game.sfx.engine_volume < 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.engine_volume must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.sfx.engine_base_speed.is_finite() || self.game.sfx.engine_base_speed <= 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.engine_base_speed must be > 0".to_string(),
+            ));
+        }
+        if !self.game.sfx.engine_accel_speed_boost.is_finite()
+            || self.game.sfx.engine_accel_speed_boost < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.engine_accel_speed_boost must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.sfx.engine_velocity_speed_boost.is_finite()
+            || self.game.sfx.engine_velocity_speed_boost < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.engine_velocity_speed_boost must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.sfx.engine_idle_gain.is_finite() || self.game.sfx.engine_idle_gain < 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.engine_idle_gain must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.sfx.engine_load_gain.is_finite() || self.game.sfx.engine_load_gain < 0.0 {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.engine_load_gain must be >= 0".to_string(),
+            ));
+        }
+        if !self.game.sfx.engine_pitch_jitter.is_finite() || self.game.sfx.engine_pitch_jitter < 0.0
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::sfx.engine_pitch_jitter must be >= 0".to_string(),
+            ));
+        }
+        for (label, value) in [
+            ("music_volume", self.game.sfx.music_volume),
+            ("gun_shot_volume", self.game.sfx.gun_shot_volume),
+            ("gun_hit_volume", self.game.sfx.gun_hit_volume),
+            ("gun_miss_volume", self.game.sfx.gun_miss_volume),
+            ("missile_launch_volume", self.game.sfx.missile_launch_volume),
+            ("missile_hit_volume", self.game.sfx.missile_hit_volume),
+            ("explode_volume", self.game.sfx.explode_volume),
+        ] {
+            if !value.is_finite() || value < 0.0 {
+                return Err(ConfigError::Validation(format!(
+                    "game.toml::sfx.{label} must be >= 0"
+                )));
+            }
+        }
         if self.game.run_upgrades.coins_per_offer == 0 {
             return Err(ConfigError::Validation(
                 "game.toml::run_upgrades.coins_per_offer must be >= 1".to_string(),
@@ -947,6 +1017,8 @@ pub struct GameFile {
     pub pickups: PickupConfig,
     #[serde(default)]
     pub run_upgrades: RunUpgradeConfig,
+    #[serde(default)]
+    pub sfx: SfxConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1330,6 +1402,143 @@ fn default_run_upgrade_options() -> Vec<RunUpgradeOptionConfig> {
             max_stacks: 50,
         },
     ]
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SfxConfig {
+    #[serde(default = "default_sfx_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_sfx_master_volume")]
+    pub master_volume: f32,
+    #[serde(default = "default_sfx_music_volume")]
+    pub music_volume: f32,
+    #[serde(default = "default_sfx_pitch_random_min")]
+    pub pitch_random_min: f32,
+    #[serde(default = "default_sfx_pitch_random_max")]
+    pub pitch_random_max: f32,
+    #[serde(default = "default_sfx_engine_volume")]
+    pub engine_volume: f32,
+    #[serde(default = "default_sfx_engine_base_speed")]
+    pub engine_base_speed: f32,
+    #[serde(default = "default_sfx_engine_accel_speed_boost")]
+    pub engine_accel_speed_boost: f32,
+    #[serde(default = "default_sfx_engine_velocity_speed_boost")]
+    pub engine_velocity_speed_boost: f32,
+    #[serde(default = "default_sfx_engine_idle_gain")]
+    pub engine_idle_gain: f32,
+    #[serde(default = "default_sfx_engine_load_gain")]
+    pub engine_load_gain: f32,
+    #[serde(default = "default_sfx_engine_pitch_jitter")]
+    pub engine_pitch_jitter: f32,
+    #[serde(default = "default_sfx_gun_shot_volume")]
+    pub gun_shot_volume: f32,
+    #[serde(default = "default_sfx_gun_hit_volume")]
+    pub gun_hit_volume: f32,
+    #[serde(default = "default_sfx_gun_miss_volume")]
+    pub gun_miss_volume: f32,
+    #[serde(default = "default_sfx_missile_launch_volume")]
+    pub missile_launch_volume: f32,
+    #[serde(default = "default_sfx_missile_hit_volume")]
+    pub missile_hit_volume: f32,
+    #[serde(default = "default_sfx_explode_volume")]
+    pub explode_volume: f32,
+}
+
+impl Default for SfxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_sfx_enabled(),
+            master_volume: default_sfx_master_volume(),
+            music_volume: default_sfx_music_volume(),
+            pitch_random_min: default_sfx_pitch_random_min(),
+            pitch_random_max: default_sfx_pitch_random_max(),
+            engine_volume: default_sfx_engine_volume(),
+            engine_base_speed: default_sfx_engine_base_speed(),
+            engine_accel_speed_boost: default_sfx_engine_accel_speed_boost(),
+            engine_velocity_speed_boost: default_sfx_engine_velocity_speed_boost(),
+            engine_idle_gain: default_sfx_engine_idle_gain(),
+            engine_load_gain: default_sfx_engine_load_gain(),
+            engine_pitch_jitter: default_sfx_engine_pitch_jitter(),
+            gun_shot_volume: default_sfx_gun_shot_volume(),
+            gun_hit_volume: default_sfx_gun_hit_volume(),
+            gun_miss_volume: default_sfx_gun_miss_volume(),
+            missile_launch_volume: default_sfx_missile_launch_volume(),
+            missile_hit_volume: default_sfx_missile_hit_volume(),
+            explode_volume: default_sfx_explode_volume(),
+        }
+    }
+}
+
+fn default_sfx_enabled() -> bool {
+    true
+}
+
+fn default_sfx_master_volume() -> f32 {
+    1.0
+}
+
+fn default_sfx_music_volume() -> f32 {
+    0.42
+}
+
+fn default_sfx_pitch_random_min() -> f32 {
+    0.94
+}
+
+fn default_sfx_pitch_random_max() -> f32 {
+    1.06
+}
+
+fn default_sfx_engine_volume() -> f32 {
+    0.32
+}
+
+fn default_sfx_engine_base_speed() -> f32 {
+    0.82
+}
+
+fn default_sfx_engine_accel_speed_boost() -> f32 {
+    0.56
+}
+
+fn default_sfx_engine_velocity_speed_boost() -> f32 {
+    0.34
+}
+
+fn default_sfx_engine_idle_gain() -> f32 {
+    0.30
+}
+
+fn default_sfx_engine_load_gain() -> f32 {
+    0.68
+}
+
+fn default_sfx_engine_pitch_jitter() -> f32 {
+    0.015
+}
+
+fn default_sfx_gun_shot_volume() -> f32 {
+    0.30
+}
+
+fn default_sfx_gun_hit_volume() -> f32 {
+    0.26
+}
+
+fn default_sfx_gun_miss_volume() -> f32 {
+    0.18
+}
+
+fn default_sfx_missile_launch_volume() -> f32 {
+    0.34
+}
+
+fn default_sfx_missile_hit_volume() -> f32 {
+    0.32
+}
+
+fn default_sfx_explode_volume() -> f32 {
+    0.40
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1940,6 +2149,7 @@ mod tests {
                 scoring: ScoringConfig::default(),
                 pickups: PickupConfig::default(),
                 run_upgrades: RunUpgradeConfig::default(),
+                sfx: SfxConfig::default(),
             },
             assets: AssetsFile::default(),
             segments: SegmentsFile {

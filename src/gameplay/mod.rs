@@ -2,6 +2,7 @@ pub mod combat;
 pub mod enemies;
 pub mod feedback;
 pub mod pickups;
+pub mod sfx;
 pub mod upgrades;
 pub mod vehicle;
 
@@ -10,6 +11,7 @@ use combat::CombatGameplayPlugin;
 use enemies::EnemyGameplayPlugin;
 use feedback::FeedbackGameplayPlugin;
 use pickups::PickupGameplayPlugin;
+use sfx::GameplaySfxPlugin;
 use upgrades::UpgradeGameplayPlugin;
 use vehicle::VehicleGameplayPlugin;
 
@@ -22,6 +24,7 @@ impl Plugin for GameplayPlugin {
             .add_plugins(PickupGameplayPlugin)
             .add_plugins(UpgradeGameplayPlugin)
             .add_plugins(CombatGameplayPlugin)
+            .add_plugins(GameplaySfxPlugin)
             .add_plugins(FeedbackGameplayPlugin);
     }
 }

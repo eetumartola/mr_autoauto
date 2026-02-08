@@ -154,6 +154,11 @@ pub(super) fn spawn_vehicle_scene(
                 PlayerVehiclePlaceholderVisual,
                 Sprite::from_color(Color::srgb(0.93, 0.34, 0.24), PLAYER_CHASSIS_SIZE),
                 Transform::from_xyz(0.0, -0.02 + PLAYER_VISUAL_RIDE_HEIGHT_OFFSET_M, 0.00),
+                if DRAW_PLAYER_GAMEPLAY_BOX_VISUALS {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                },
             ));
 
             parent.spawn((
@@ -164,6 +169,11 @@ pub(super) fn spawn_vehicle_scene(
                 Transform::from_translation(
                     PLAYER_TURRET_OFFSET_LOCAL + (Vec3::Y * PLAYER_VISUAL_RIDE_HEIGHT_OFFSET_M),
                 ),
+                if DRAW_PLAYER_GAMEPLAY_BOX_VISUALS {
+                    Visibility::Inherited
+                } else {
+                    Visibility::Hidden
+                },
             ));
 
             // Side-view wheel entities represent synchronized left/right tire pairs in the 2D solve.
