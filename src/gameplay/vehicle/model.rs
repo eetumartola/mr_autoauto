@@ -1,5 +1,11 @@
 use super::*;
 
+pub(super) fn reset_vehicle_visual_turret_aim_state(
+    mut state: ResMut<VehicleVisualTurretAimState>,
+) {
+    *state = VehicleVisualTurretAimState::default();
+}
+
 pub(super) fn request_vehicle_model_scene_dump_hotkey(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<VehicleModelDebugState>,
@@ -462,7 +468,9 @@ pub(super) fn spin_wheel_pairs(
 
 #[allow(clippy::type_complexity)]
 pub(super) fn sync_player_vehicle_visual_aim_and_model_wheels(
+    time: Res<Time>,
     targeting: Option<Res<TurretTargetingState>>,
+    mut visual_turret_aim_state: ResMut<VehicleVisualTurretAimState>,
     wheel_pair_query: Query<
         (&PlayerWheelPairVisual, &Transform, &GlobalTransform),
         (
@@ -503,12 +511,26 @@ pub(super) fn sync_player_vehicle_visual_aim_and_model_wheels(
         .map(|state| state.aim_direction_local.normalize_or_zero())
         .filter(|direction| direction.length_squared() > f32::EPSILON)
         .unwrap_or(Vec2::X);
-    let aim_angle_rad = aim_direction_local.y.atan2(aim_direction_local.x);
+    let target_aim_angle_rad = aim_direction_local.y.atan2(aim_direction_local.x);
+    if !visual_turret_aim_state.initialized {
+        visual_turret_aim_state.initialized = true;
+        visual_turret_aim_state.smoothed_angle_rad = target_aim_angle_rad;
+    } else {
+        let dt = time.delta_secs().max(0.000_1);
+        let blend = 1.0 - f32::exp(-TURRET_VISUAL_AIM_SMOOTH_RATE_HZ * dt);
+        let angle_delta = shortest_angle_delta_rad(
+            target_aim_angle_rad,
+            visual_turret_aim_state.smoothed_angle_rad,
+        );
+        visual_turret_aim_state.smoothed_angle_rad =
+            wrap_angle_pi(visual_turret_aim_state.smoothed_angle_rad + (angle_delta * blend));
+    }
+    let visual_aim_angle_rad = visual_turret_aim_state.smoothed_angle_rad;
 
     for mut transform in &mut placeholder_turret_query {
         transform.translation =
             PLAYER_TURRET_OFFSET_LOCAL + (Vec3::Y * PLAYER_VISUAL_RIDE_HEIGHT_OFFSET_M);
-        transform.rotation = Quat::from_rotation_z(aim_angle_rad);
+        transform.rotation = Quat::from_rotation_z(visual_aim_angle_rad);
     }
 
     let mut front_spin_angle_rad = 0.0;
@@ -564,7 +586,7 @@ pub(super) fn sync_player_vehicle_visual_aim_and_model_wheels(
     }
 
     for (turret_node, mut transform) in &mut model_turret_query {
-        let aim_delta = Quat::from_axis_angle(turret_node.aim_axis_local, aim_angle_rad);
+        let aim_delta = Quat::from_axis_angle(turret_node.aim_axis_local, visual_aim_angle_rad);
         let (translation, rotation) = rotate_local_transform_around_pivot(
             turret_node.base_translation,
             turret_node.base_rotation,
@@ -605,6 +627,18 @@ fn rotate_local_transform_around_pivot(
     let rotated_pivot_world = rotation * (target_scale * pivot_local);
     let translation = base_translation + (base_pivot_world - rotated_pivot_world);
     (translation, rotation)
+}
+
+fn shortest_angle_delta_rad(target: f32, current: f32) -> f32 {
+    let two_pi = std::f32::consts::TAU;
+    let pi = std::f32::consts::PI;
+    (target - current + pi).rem_euclid(two_pi) - pi
+}
+
+fn wrap_angle_pi(angle: f32) -> f32 {
+    let two_pi = std::f32::consts::TAU;
+    let pi = std::f32::consts::PI;
+    (angle + pi).rem_euclid(two_pi) - pi
 }
 
 fn apply_uniform_vertex_color(mesh: &mut Mesh, color: [f32; 4]) {

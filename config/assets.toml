@@ -80,6 +80,10 @@ path = "splats/mystical.ply"
 id = "castle"
 path = "splats/castle.ply"
 
+[[splats]]
+id = "cemetery"
+path = "splats/cemetery.ply"
+
 [[audio]]
 id = "sfx_player_shot"
 path = "audio/sfx/player_shot.ogg"

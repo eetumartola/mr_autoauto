@@ -1984,6 +1984,7 @@ V - Toggle vehicle tuning panel\n\
 B - Toggle background tuning panel\n\
 M - Toggle audio tuning panel\n\
 I / P - Pan camera left / right\n\
+Tab - Debug warp to next segment\n\
 A/D or Left/Right - Choose upgrade option (when shown)\n\
 F5 - Hot-reload config\n\
 D / Right - Accelerate\n\

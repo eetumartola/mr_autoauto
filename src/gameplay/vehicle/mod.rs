@@ -107,7 +107,7 @@ const WHEELIE_MIN_SPEED_MPS: f32 = 2.0;
 const CRASH_LANDING_SPEED_THRESHOLD_MPS: f32 = 9.0;
 const CRASH_LANDING_ANGLE_THRESHOLD_DEG: f32 = 50.0;
 const LANDING_DAMAGE_PER_MPS_OVER_THRESHOLD: f32 = 2.4;
-const PLAYER_HP_BAR_OFFSET_Y_M: f32 = 1.9;
+const PLAYER_HP_BAR_OFFSET_Y_M: f32 = 2.2;
 const PLAYER_HP_BAR_BG_WIDTH_M: f32 = 3.3;
 const PLAYER_HP_BAR_BG_HEIGHT_M: f32 = 0.26;
 const PLAYER_HP_BAR_FILL_HEIGHT_M: f32 = 0.16;
@@ -128,6 +128,7 @@ const PLAYER_WHEEL_VISUAL_SCALE: f32 = 1.70;
 const PLAYER_VISUAL_RIDE_HEIGHT_OFFSET_M: f32 = 0.46;
 const PLAYER_MODEL_WHEEL_FOREGROUND_Z_BIAS_M: f32 = 1.2;
 const DRAW_PLAYER_GAMEPLAY_BOX_VISUALS: bool = false;
+const TURRET_VISUAL_AIM_SMOOTH_RATE_HZ: f32 = 18.0;
 
 pub struct VehicleGameplayPlugin;
 
@@ -140,6 +141,7 @@ impl Plugin for VehicleGameplayPlugin {
             .init_resource::<VehicleStuntMetrics>()
             .init_resource::<StuntTrackingState>()
             .init_resource::<VehicleModelDebugState>()
+            .init_resource::<VehicleVisualTurretAimState>()
             .add_message::<VehicleStuntEvent>()
             .add_message::<VehicleLandingEvent>()
             .add_systems(
@@ -149,6 +151,7 @@ impl Plugin for VehicleGameplayPlugin {
                     spawn_vehicle_scene,
                     reset_stunt_metrics,
                     reset_camera_follow_state,
+                    reset_vehicle_visual_turret_aim_state,
                 ),
             )
             .add_systems(OnExit(GameState::InRun), cleanup_vehicle_scene)
@@ -287,6 +290,12 @@ struct PlayerVehicleModelSceneSpawn {
 #[derive(Resource, Debug, Default)]
 struct VehicleModelDebugState {
     dump_requested: bool,
+}
+
+#[derive(Resource, Debug, Clone, Copy, Default)]
+struct VehicleVisualTurretAimState {
+    initialized: bool,
+    smoothed_angle_rad: f32,
 }
 
 #[derive(Component, Debug, Clone, Default)]

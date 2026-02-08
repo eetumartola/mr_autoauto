@@ -314,7 +314,7 @@ environment = "ice"
 - [in progress] E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
   - first splat asset hook is active via `backgrounds.toml::splat_asset_id` + `assets.toml::splats`.
   - [done] Added background placement tuning workflow (`B` debug panel): live `parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m`, `ground_lowering_m` edits + apply persists to `backgrounds.toml` and `game.toml`.
-  - [done] Segment naming pass: active segment IDs are now `castle` and `mythical` (with `castle` first).
+  - [done] Segment naming pass: active segment IDs are now `cemetery`, `castle`, and `mythical` (with `cemetery` first).
   - [done] Runtime splat background sync now follows the currently active segment by run distance and swaps splat assets when segment changes.
   - [done] Terrain wave settings (`wave_a/b/c` amplitude/frequency) are now segment-specific via `backgrounds.toml`; all terrain sampling systems resolve values from the active segment.
 - [not started] E2. Segment placement:
@@ -366,6 +366,7 @@ environment = "ice"
 **Tasks**
 - [done] G1. Event model:
   - `GameEvent` enum (JumpBig, WheelieLong, Flip, Kill, BossKill, Crash, SpeedTier, NearDeath, Streak).
+  - [done] Added runtime commentary triggers for `3+ enemies visible on screen`, `boss spawned`, `boss defeated`, and `player hit by bomb`.
 - [done] G2. Event aggregation:
   - batch events into a compact "what happened" text summary.
   - de-duplicate spammy events; apply cooldowns and priorities.
@@ -494,7 +495,7 @@ environment = "ice"
   - scoring uses distance + kills + stunts + bonuses from TOML.
   - upgrade offers trigger by coin milestones and pause gameplay for selection.
 - Segment pacing decision:
-  - segment lengths set to `castle=512m`, `mythical=1024m`.
+  - segment lengths set to `cemetery=768m`, `castle=512m`, `mythical=1024m`.
   - boss encounter triggers 20m before segment end.
   - while the segment boss is alive (or portal is pending), player progression is gated at the boss line so the run stays in the current segment.
   - defeating the boss advances/teleports run to the next segment start.
@@ -541,6 +542,7 @@ environment = "ice"
 - Camera readability note:
   - gameplay camera now uses smoothed speed-based zoom (closer view at low speed, wider view at high speed).
   - keep gameplay and model cameras projection-synced during zoom to prevent visual-vs-physics drift.
+  - turret visuals now use a light smoothing filter, while targeting line and projectile firing remain immediate/off the unsmoothed aim direction.
 - Feedback polish note:
   - added a dedicated gameplay feedback layer (`src/gameplay/feedback/mod.rs`) for directional damage indicators, lightweight camera shake, landing dust particles, and pickup sparkle particles.
   - feedback layer now also renders richer hit/death particles from combat and enemy projectile impact events, including bomb-on-ground impacts.

@@ -1,6 +1,9 @@
 use crate::config::{CommentatorProfile, GameConfig};
 use crate::gameplay::combat::EnemyKilledEvent;
-use crate::gameplay::enemies::{PlayerDamageEvent, PlayerDamageSource, PlayerEnemyCrashEvent};
+use crate::gameplay::enemies::{
+    Enemy, PlayerDamageEvent, PlayerDamageSource, PlayerEnemyCrashEvent, SegmentBossDefeatedEvent,
+    SegmentBossSpawnedEvent,
+};
 use crate::gameplay::vehicle::{
     PlayerHealth, PlayerVehicle, VehicleStuntEvent, VehicleStuntMetrics, VehicleTelemetry,
 };
@@ -27,6 +30,7 @@ const COMMENTARY_MAX_QUEUE_SIZE: usize = 96;
 const COMMENTARY_RETAINED_RECENT_EVENTS: usize = 12;
 const SUBTITLE_PANEL_BOTTOM_PX: f32 = 36.0;
 const COMMENTARY_HEAVY_DAMAGE_THRESHOLD_HP: f32 = 8.0;
+const COMMENTARY_VISIBLE_ENEMY_SWARM_THRESHOLD: u32 = 3;
 
 pub struct CommentaryStubPlugin;
 
@@ -106,6 +110,15 @@ pub enum GameEvent {
         speed_mps: f32,
         enemy_type_id: String,
     },
+    EnemySwarmVisible {
+        visible_count: u32,
+    },
+    BossSpawned {
+        segment_id: String,
+    },
+    BossDefeated {
+        segment_id: String,
+    },
     Streak {
         count: u32,
     },
@@ -128,6 +141,9 @@ impl GameEvent {
             Self::HeavyDamage { .. } => "HeavyDamage",
             Self::HitByBomb { .. } => "HitByBomb",
             Self::CrashIntoEnemy { .. } => "CrashIntoEnemy",
+            Self::EnemySwarmVisible { .. } => "EnemySwarmVisible",
+            Self::BossSpawned { .. } => "BossSpawned",
+            Self::BossDefeated { .. } => "BossDefeated",
             Self::Streak { .. } => "Streak",
             Self::Manual { .. } => "Manual",
         }
@@ -187,6 +203,7 @@ pub struct CommentaryStubState {
     last_crash_count: u32,
     last_speed_tier: u8,
     near_death_active: bool,
+    enemy_swarm_active: bool,
     kill_streak_count: u32,
     last_kill_time_seconds: f64,
     last_speaker_id: String,
@@ -219,6 +236,7 @@ impl Default for CommentaryStubState {
             last_crash_count: 0,
             last_speed_tier: 0,
             near_death_active: false,
+            enemy_swarm_active: false,
             kill_streak_count: 0,
             last_kill_time_seconds: 0.0,
             last_speaker_id: String::new(),
@@ -249,6 +267,11 @@ struct SummaryAggregation {
     total_bomb_damage_hp: f32,
     crash_enemy_count: u32,
     fastest_enemy_crash_mps: f32,
+    visible_enemy_count_peak: u32,
+    boss_spawn_count: u32,
+    boss_spawn_segment: Option<String>,
+    boss_kill_count: u32,
+    boss_kill_segment: Option<String>,
     streak_count: u32,
     manual_labels: Vec<String>,
 }
@@ -319,8 +342,12 @@ fn collect_commentary_events(
     telemetry: Option<Res<VehicleTelemetry>>,
     stunt_metrics: Option<Res<VehicleStuntMetrics>>,
     player_query: Query<&PlayerHealth, With<PlayerVehicle>>,
+    camera_query: Query<(&GlobalTransform, &Projection), With<Camera2d>>,
+    enemy_query: Query<&GlobalTransform, With<Enemy>>,
     mut stunt_events: MessageReader<VehicleStuntEvent>,
     mut kill_events: MessageReader<EnemyKilledEvent>,
+    mut boss_spawned_events: MessageReader<SegmentBossSpawnedEvent>,
+    mut boss_defeated_events: MessageReader<SegmentBossDefeatedEvent>,
     mut player_damage_events: MessageReader<PlayerDamageEvent>,
     mut player_enemy_crash_events: MessageReader<PlayerEnemyCrashEvent>,
     mut state: ResMut<CommentaryStubState>,
@@ -440,6 +467,43 @@ fn collect_commentary_events(
                 enemy_type_id: event.enemy_type_id.clone(),
             },
         );
+    }
+
+    for event in boss_spawned_events.read() {
+        push_event(
+            &mut state,
+            GameEvent::BossSpawned {
+                segment_id: event.segment_id.clone(),
+            },
+        );
+    }
+
+    for event in boss_defeated_events.read() {
+        push_event(
+            &mut state,
+            GameEvent::BossDefeated {
+                segment_id: event.segment_id.clone(),
+            },
+        );
+    }
+
+    if let Some(visible_enemy_count) = count_visible_enemies_on_screen(&camera_query, &enemy_query)
+    {
+        if visible_enemy_count >= COMMENTARY_VISIBLE_ENEMY_SWARM_THRESHOLD
+            && !state.enemy_swarm_active
+        {
+            state.enemy_swarm_active = true;
+            push_event(
+                &mut state,
+                GameEvent::EnemySwarmVisible {
+                    visible_count: visible_enemy_count,
+                },
+            );
+        } else if visible_enemy_count < COMMENTARY_VISIBLE_ENEMY_SWARM_THRESHOLD {
+            state.enemy_swarm_active = false;
+        }
+    } else {
+        state.enemy_swarm_active = false;
     }
 
     if let Some(telemetry) = telemetry {
@@ -1107,6 +1171,17 @@ fn build_summary_text(events: &[GameEvent]) -> String {
                 agg.crash_enemy_count = agg.crash_enemy_count.saturating_add(1);
                 agg.fastest_enemy_crash_mps = agg.fastest_enemy_crash_mps.max(*speed_mps);
             }
+            GameEvent::EnemySwarmVisible { visible_count } => {
+                agg.visible_enemy_count_peak = agg.visible_enemy_count_peak.max(*visible_count);
+            }
+            GameEvent::BossSpawned { segment_id } => {
+                agg.boss_spawn_count = agg.boss_spawn_count.saturating_add(1);
+                agg.boss_spawn_segment = Some(segment_id.clone());
+            }
+            GameEvent::BossDefeated { segment_id } => {
+                agg.boss_kill_count = agg.boss_kill_count.saturating_add(1);
+                agg.boss_kill_segment = Some(segment_id.clone());
+            }
             GameEvent::Streak { count } => {
                 agg.streak_count = agg.streak_count.max(*count);
             }
@@ -1181,6 +1256,26 @@ fn build_summary_text(events: &[GameEvent]) -> String {
             agg.fastest_enemy_crash_mps
         ));
     }
+    if agg.visible_enemy_count_peak >= COMMENTARY_VISIBLE_ENEMY_SWARM_THRESHOLD {
+        parts.push(format!(
+            "{} enemies are visible on screen",
+            agg.visible_enemy_count_peak
+        ));
+    }
+    if agg.boss_spawn_count > 0 {
+        if let Some(segment_id) = agg.boss_spawn_segment.as_deref() {
+            parts.push(format!("segment boss spawned in {segment_id}"));
+        } else {
+            parts.push("segment boss spawned".to_string());
+        }
+    }
+    if agg.boss_kill_count > 0 {
+        if let Some(segment_id) = agg.boss_kill_segment.as_deref() {
+            parts.push(format!("segment boss was destroyed in {segment_id}"));
+        } else {
+            parts.push("segment boss was destroyed".to_string());
+        }
+    }
     if agg.streak_count >= 2 {
         parts.push(format!("player kill streak is {}", agg.streak_count));
     }
@@ -1226,6 +1321,35 @@ fn next_rng_u32(state: &mut u64) -> u32 {
         .wrapping_mul(6364136223846793005)
         .wrapping_add(1442695040888963407);
     ((*state >> 32) & 0xFFFF_FFFF) as u32
+}
+
+fn count_visible_enemies_on_screen(
+    camera_query: &Query<(&GlobalTransform, &Projection), With<Camera2d>>,
+    enemy_query: &Query<&GlobalTransform, With<Enemy>>,
+) -> Option<u32> {
+    let Ok((camera_transform, projection)) = camera_query.single() else {
+        return None;
+    };
+    let Projection::Orthographic(ortho) = projection else {
+        return None;
+    };
+
+    let camera_position = camera_transform.translation().truncate();
+    let visible_min = camera_position + ortho.area.min;
+    let visible_max = camera_position + ortho.area.max;
+
+    let mut visible_count = 0_u32;
+    for enemy_transform in enemy_query.iter() {
+        let position = enemy_transform.translation().truncate();
+        if position.x >= visible_min.x
+            && position.x <= visible_max.x
+            && position.y >= visible_min.y
+            && position.y <= visible_max.y
+        {
+            visible_count = visible_count.saturating_add(1);
+        }
+    }
+    Some(visible_count)
 }
 
 fn next_audio_output_path(extension: &str, speaker_id: &str) -> PathBuf {
