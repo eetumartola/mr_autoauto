@@ -405,6 +405,9 @@ environment = "ice"
   - light camera shake now reacts to incoming damage, enemy crashes, and hard landings.
 - [done] H4. Feedback polish:
   - muzzle flash, screen shake on big hits, dust on landing, coin pickup sparkle.
+  - expanded impact/death particle pass:
+    - richer burst/smoke particles for projectile hits and enemy deaths.
+    - enemy bomb ground impacts now spawn visible explosion/dust effects.
 - [in progress] H5. Audio mix:
   - music bed loop; mix levels; narration ducking.
   - [done] Added gameplay SFX layer (engine loop + gun/missile shot/hit/miss + explosion) with configurable per-sound relative volumes in `game.toml::sfx`.
@@ -446,13 +449,9 @@ environment = "ice"
 - Splat compatibility strategy: use a vendored patch-crate approach so Gaussian splats work on stable builds.
 - Config architecture: core gameplay parameters are data-driven through `config/*.toml` with fail-fast cross-reference validation.
 - Runtime iteration workflow: `F5` hot-reloads config safely; invalid reloads are rejected without corrupting runtime state.
-- Controls baseline: keyboard `A/D` and `Left/Right` for brake/accel and in-air rotation.
-- Debug UX baseline: keybind help is hidden by default and toggled with `H`.
-- Debug text control: `O` toggles on-screen debug text overlays; debug camera pan uses `I/P`.
 - Live tuning workflow:
   - `V` vehicle tuning panel edits runtime values immediately.
   - `Apply` persists vehicle tuning back to `config/vehicles.toml`.
-  - player is invulnerable while vehicle tuning panel is open.
 - Background tuning workflow:
   - `B` background tuning panel edits parallax/offset/scale/loop length and terrain `ground_lowering_m` live.
   - `Apply` persists background values to `config/backgrounds.toml` and terrain lowering to `config/game.toml`.
@@ -488,22 +487,16 @@ environment = "ice"
   - HP zero transitions to `Results`.
   - scoring uses distance + kills + stunts + bonuses from TOML.
   - upgrade offers trigger by coin milestones and pause gameplay for selection.
-  - upgrade pool now includes handling, targeting, and missile homing improvements in addition to health/fire-rate options.
-- Upgrade UX decision: offer two random choices, selected with left/right controls, requiring a fresh keypress after panel opens.
-  - after selection, keep the upgrade panel briefly visible with a clear selected-card highlight before closing.
-  - do not mutate card/header text during the post-selection hold; keep layout stable and only use visual highlight.
+- Upgrade UX decision: two random choices, selected with left/right controls, requiring a fresh keypress after panel opens.
 - Stability policy:
   - prefer disjoint queries/`Without`/combined-query patterns to avoid Bevy `B0001` conflicts.
   - use `try_despawn()` for resilience against duplicate-despawn command races.
 - Rendering/dev policy:
-  - run Gaussian-splat feature checks only when changes touch splat/rendering integration.
   - loading state should wait for critical assets to load before entering `InRun`.
   - isolate splat background rendering on a dedicated render layer to prevent gameplay meshes (for example 3D vehicle model) from being rendered by the splat camera.
   - keep a dedicated gameplay `Camera3d` for vehicle models, synchronized to the main `Camera2d`, so 3D gameplay meshes remain visible after splat-layer isolation.
-  - render-order policy: keep the vehicle-model camera order above the 2D gameplay camera so the mesh cannot be occluded by the 2D pass.
   - `bevy_gaussian_splatting` sort system expects non-negative camera order; do not use negative `Camera::order` on Gaussian cameras.
 - Maintenance decisions:
-  - keep C6 SFX placeholders deferred for now.
   - split oversized files during follow-up refactors (`vehicle` and `commentary_stub` are both past the preferred size threshold).
   - completed first `vehicle` split pass: `src/gameplay/vehicle/mod.rs` now coordinates constants/types/plugin only; systems moved into `scene.rs`, `model.rs`, `runtime.rs`, and `terrain.rs`.
 - BR5 status decision: 3D vehicle integration is active.
@@ -511,47 +504,31 @@ environment = "ice"
   - active model is `assets/models/vehicles/car_rally.glb#Scene0`.
   - `N` dumps loaded scene node names/transforms for mapping.
   - runtime fit derives orientation/scale from wheel/chassis/turret geometry as iterative bootstrap.
-  - keep physics-synced wheel-pair overlays visible with imported model until wheel-node pivot rigging is implemented, so suspension travel remains readable.
-  - during alignment phase, keep placeholder chassis/turret visible and drive turret/wheel visual motion from gameplay state for side-by-side validation.
   - wheel/turret node animation uses local-pivot compensation (instead of origin-only rotation) and wheel visual size is derived from measured wheel mesh bounds toward physics tire radius.
-  - when applying wheel scale overrides, preserve base pivot world position (base-scale -> target-scale compensation) to avoid wheel orbiting/offset drift.
   - wheel-node runtime placement now pins each wheel pivot to the corresponding wheel-pair (physics visual proxy) world position each frame for exact suspension/position tracking.
 - Enemy model visual-fit pass:
   - hooked `owl_tower.glb` and `owl_bomber.glb` via `assets.toml` model entries.
   - enemy model setup now uses a simplified bounds fit (auto scale + center offset) against existing gameplay body size, keeping collider/hitbox logic unchanged.
-  - owl model overrides: force facing-left orientation; tower uses 2x visual scale and bomber uses 3x for first-pass readability.
   - hooked `beetle_rough.glb` for walker, `beetle_green.glb` for charger, and `bullfinch.glb` for flier via enemy-specific model IDs.
-  - beetle/bullfinch model orientation now matches owl facing (left-facing in world space).
-  - physics/gameplay placeholder body boxes for player/enemies are kept in code but hidden by default to favor mesh readability.
-  - charger and flier hitbox radii increased by 30% for clearer contact/collision behavior.
-  - walker visual model scale set to 2.0x and flier (`bullfinch`) to 2.5x for readability.
-- Spawn pacing note:
-  - enemy bootstrap spacing increased by 25% (16m -> 20m).
 - Terrain/sample consistency note:
   - all gameplay systems that sample terrain height (vehicle, combat/projectile impacts, enemies, pickups) now apply `game.toml::terrain.ground_lowering_m` consistently.
-- Vehicle wheel readability note:
-  - increased wheel hardpoint spread and added stronger model-wheel foreground Z bias to keep tires visibly in front of chassis during gameplay.
 - Ground-follow behavior note:
-  - walker and charger enemy movement now follows terrain tangent (velocity projected along slope) and aligns body rotation to ground angle to avoid uphill sticking.
-  - increased walker/charger velocity response (acceleration toward target velocity) so they can recover speed and climb slopes more reliably.
-  - added explicit uphill speed boost and stronger ground-follow rates for walker/charger to better handle steeper slope transitions.
-  - bomber cruise path now includes a subtle sine-wave vertical motion instead of perfectly straight flight.
-  - bomber cruise wave period increased (frequency halved) for a longer, smoother vertical oscillation.
+  - walker/charger follow terrain tangent and use tuned uphill movement to handle slopes reliably.
+  - bomber uses a long-period sine-wave cruise path.
   - enemy projectile firing is constrained to forward/up sectors; backward shots are clamped out.
-- Debug UX update:
-  - on-screen debug text overlays are hidden by default and can be toggled with `O`.
 - HUD polish note:
   - introduced a dedicated gameplay HUD overlay (`src/ui/mod.rs`) separate from debug diagnostics to keep play info readable while preserving tuning data.
-  - raised the world-space player HP bar offset slightly so it clears the turret more clearly.
+- Camera readability note:
+  - gameplay camera now uses smoothed speed-based zoom (closer view at low speed, wider view at high speed).
+  - keep gameplay and model cameras projection-synced during zoom to prevent visual-vs-physics drift.
 - Feedback polish note:
   - added a dedicated gameplay feedback layer (`src/gameplay/feedback/mod.rs`) for directional damage indicators, lightweight camera shake, landing dust particles, and pickup sparkle particles.
+  - feedback layer now also renders richer hit/death particles from combat and enemy projectile impact events, including bomb-on-ground impacts.
   - extended runtime events with world positions (`PlayerDamageEvent`, `PickupCollectedEvent`, `VehicleLandingEvent`) so UI/FX can react contextually.
 - Audio mix note:
   - gameplay SFX now uses data-driven mix values under `game.toml::sfx` (master, per-sound relative volume, pitch random range, engine loop response/jitter).
   - WAV-only audio pipeline for runtime playback: removed Bevy `mp3` decoding feature and now reject non-WAV Neocortex narration payloads to avoid demuxer false-positive crashes.
   - SFX runtime loader now reads WAV bytes directly and normalizes malformed PCM `fmt` header fields (e.g., incorrect mono `byte_rate`) before playback to prevent Bevy decode panics.
-- Documentation note:
-  - `README.md` now renders the loading/logo image at the top for quick visual identity in the repository landing page.
 
 ---
 

@@ -504,7 +504,10 @@ pub(super) fn camera_follow_vehicle(
     debug_camera_pan: Option<Res<DebugCameraPanState>>,
     mut follow_state: ResMut<CameraFollowState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
-    mut camera_query: Query<&mut Transform, (With<Camera2d>, Without<PlayerVehicle>)>,
+    mut camera_query: Query<
+        (&mut Transform, &mut Projection),
+        (With<Camera2d>, Without<PlayerVehicle>),
+    >,
 ) {
     let Some(vehicle) = config.vehicles_by_id.get(&config.game.app.default_vehicle) else {
         return;
@@ -513,7 +516,7 @@ pub(super) fn camera_follow_vehicle(
     let Ok(player_transform) = player_query.single() else {
         return;
     };
-    let Ok(mut camera_transform) = camera_query.single_mut() else {
+    let Ok((mut camera_transform, mut camera_projection)) = camera_query.single_mut() else {
         return;
     };
     let pan_offset = debug_camera_pan.map(|pan| pan.offset_x_m).unwrap_or(0.0);
@@ -542,16 +545,32 @@ pub(super) fn camera_follow_vehicle(
     }
     camera_transform.translation.y = CAMERA_Y;
     camera_transform.translation.z = CAMERA_Z;
+
+    let speed_fraction = (telemetry.speed_mps.abs() / vehicle.max_forward_speed.max(1.0))
+        .clamp(0.0, 1.0);
+    let target_zoom_scale = CAMERA_ZOOM_MIN_SCALE_METERS
+        + ((CAMERA_ZOOM_MAX_SCALE_METERS - CAMERA_ZOOM_MIN_SCALE_METERS) * speed_fraction);
+    if let Projection::Orthographic(ortho) = &mut *camera_projection {
+        let zoom_blend = (CAMERA_ZOOM_SMOOTH_RATE_HZ * dt).clamp(0.0, 1.0);
+        ortho.scale = ortho.scale.lerp(target_zoom_scale, zoom_blend);
+    }
 }
 
 pub(super) fn sync_vehicle_model_camera_with_gameplay_camera(
-    gameplay_camera_query: Query<&Transform, (With<Camera2d>, Without<PlayerVehicleModelCamera>)>,
-    mut model_camera_query: Query<&mut Transform, With<PlayerVehicleModelCamera>>,
+    gameplay_camera_query: Query<
+        (&Transform, &Projection),
+        (With<Camera2d>, Without<PlayerVehicleModelCamera>),
+    >,
+    mut model_camera_query: Query<
+        (&mut Transform, &mut Projection),
+        With<PlayerVehicleModelCamera>,
+    >,
 ) {
-    let Ok(gameplay_transform) = gameplay_camera_query.single() else {
+    let Ok((gameplay_transform, gameplay_projection)) = gameplay_camera_query.single() else {
         return;
     };
-    let Ok(mut model_camera_transform) = model_camera_query.single_mut() else {
+    let Ok((mut model_camera_transform, mut model_camera_projection)) = model_camera_query.single_mut()
+    else {
         return;
     };
 
@@ -566,6 +585,12 @@ pub(super) fn sync_vehicle_model_camera_with_gameplay_camera(
         ),
         Vec3::Y,
     );
+
+    if let (Projection::Orthographic(gameplay_ortho), Projection::Orthographic(model_ortho)) =
+        (&*gameplay_projection, &mut *model_camera_projection)
+    {
+        model_ortho.scale = gameplay_ortho.scale;
+    }
 }
 
 #[cfg(feature = "gaussian_splats")]

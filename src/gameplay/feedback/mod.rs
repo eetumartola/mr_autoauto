@@ -1,8 +1,16 @@
-use crate::gameplay::enemies::{PlayerDamageEvent, PlayerDamageSource, PlayerEnemyCrashEvent};
+use crate::gameplay::combat::{
+    EnemyKilledEvent, PlayerProjectileAudioKind, PlayerProjectileImpactEvent,
+    PlayerProjectileImpactTarget,
+};
+use crate::gameplay::enemies::{
+    EnemyProjectileImpactEvent, EnemyProjectileImpactKind, EnemyProjectileImpactTarget,
+    PlayerDamageEvent, PlayerDamageSource, PlayerEnemyCrashEvent,
+};
 use crate::gameplay::pickups::{PickupCollectedEvent, PickupKind};
 use crate::gameplay::vehicle::{PlayerVehicle, VehicleLandingEvent};
 use crate::states::GameState;
 use bevy::prelude::*;
+use std::f32::consts::TAU;
 
 const DAMAGE_INDICATOR_Z: i32 = 240;
 const DAMAGE_INDICATOR_BASE_COLOR: Color = Color::srgba(1.0, 0.24, 0.20, 0.85);
@@ -11,6 +19,9 @@ const CAMERA_SHAKE_DECAY_PER_SECOND: f32 = 1.8;
 const CAMERA_SHAKE_MAX_OFFSET_X_M: f32 = 0.9;
 const CAMERA_SHAKE_MAX_OFFSET_Y_M: f32 = 0.55;
 const FEEDBACK_PARTICLE_Z_M: f32 = 5.1;
+const FX_SMALL_BURST_COUNT: usize = 10;
+const FX_MEDIUM_BURST_COUNT: usize = 16;
+const FX_LARGE_BURST_COUNT: usize = 24;
 
 pub struct FeedbackGameplayPlugin;
 
@@ -227,6 +238,9 @@ fn collect_feedback_events(
     mut crash_events: MessageReader<PlayerEnemyCrashEvent>,
     mut landing_events: MessageReader<VehicleLandingEvent>,
     mut pickup_events: MessageReader<PickupCollectedEvent>,
+    mut player_projectile_impact_events: MessageReader<PlayerProjectileImpactEvent>,
+    mut enemy_projectile_impact_events: MessageReader<EnemyProjectileImpactEvent>,
+    mut enemy_killed_events: MessageReader<EnemyKilledEvent>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
     mut indicators: ResMut<DamageIndicatorState>,
     mut shake: ResMut<CameraShakeState>,
@@ -246,6 +260,15 @@ fn collect_feedback_events(
             trauma_bump += 0.10;
         }
         shake.trauma = (shake.trauma + trauma_bump).clamp(0.0, 1.0);
+
+        if let Some(source_position) = event.source_world_position {
+            spawn_player_hit_particles(
+                &mut commands,
+                source_position,
+                event.source,
+                &mut shake.rng_state,
+            );
+        }
     }
 
     for event in crash_events.read() {
@@ -275,6 +298,26 @@ fn collect_feedback_events(
             event.kind,
             &mut shake.rng_state,
         );
+    }
+
+    for event in player_projectile_impact_events.read() {
+        spawn_player_projectile_impact_particles(&mut commands, *event, &mut shake.rng_state);
+    }
+
+    for event in enemy_projectile_impact_events.read() {
+        spawn_enemy_projectile_impact_particles(&mut commands, *event, &mut shake.rng_state);
+        if event.kind == EnemyProjectileImpactKind::Bomb {
+            let trauma_bump = match event.target {
+                EnemyProjectileImpactTarget::Ground => 0.14,
+                EnemyProjectileImpactTarget::Player => 0.18,
+            };
+            shake.trauma = (shake.trauma + trauma_bump).clamp(0.0, 1.0);
+        }
+    }
+
+    for event in enemy_killed_events.read() {
+        spawn_enemy_death_particles(&mut commands, event.world_position, &mut shake.rng_state);
+        shake.trauma = (shake.trauma + 0.07).clamp(0.0, 1.0);
     }
 }
 
@@ -463,6 +506,329 @@ fn spawn_pickup_sparkle_particles(
                 world_position.x,
                 world_position.y + 0.20,
                 FEEDBACK_PARTICLE_Z_M + 0.02,
+            ),
+        ));
+    }
+}
+
+fn spawn_player_hit_particles(
+    commands: &mut Commands,
+    world_position: Vec2,
+    source: PlayerDamageSource,
+    rng_state: &mut u64,
+) {
+    let (warm_color, cool_color, count, speed_scale) = match source {
+        PlayerDamageSource::ProjectileBullet => (
+            Color::srgba(1.0, 0.90, 0.52, 0.92),
+            Color::srgba(1.0, 0.62, 0.30, 0.92),
+            FX_SMALL_BURST_COUNT,
+            1.0,
+        ),
+        PlayerDamageSource::ProjectileMissile => (
+            Color::srgba(1.0, 0.86, 0.42, 0.94),
+            Color::srgba(1.0, 0.44, 0.20, 0.94),
+            FX_MEDIUM_BURST_COUNT,
+            1.25,
+        ),
+        PlayerDamageSource::ProjectileBomb => (
+            Color::srgba(1.0, 0.84, 0.38, 0.96),
+            Color::srgba(0.86, 0.36, 0.18, 0.96),
+            FX_LARGE_BURST_COUNT,
+            1.45,
+        ),
+        PlayerDamageSource::Contact => (
+            Color::srgba(0.96, 0.90, 0.72, 0.88),
+            Color::srgba(0.72, 0.64, 0.54, 0.88),
+            FX_SMALL_BURST_COUNT,
+            0.9,
+        ),
+    };
+
+    spawn_radial_burst_particles(
+        commands,
+        "PlayerHitBurstFx",
+        world_position,
+        count,
+        warm_color,
+        cool_color,
+        4.0 * speed_scale,
+        12.0 * speed_scale,
+        0.22,
+        13.0,
+        3.0,
+        0.06,
+        0.16,
+        0.18,
+        0.44,
+        rng_state,
+    );
+}
+
+fn spawn_player_projectile_impact_particles(
+    commands: &mut Commands,
+    event: PlayerProjectileImpactEvent,
+    rng_state: &mut u64,
+) {
+    match (event.kind, event.target) {
+        (PlayerProjectileAudioKind::Bullet, PlayerProjectileImpactTarget::Enemy) => {
+            spawn_radial_burst_particles(
+                commands,
+                "BulletEnemyHitFx",
+                event.world_position,
+                FX_SMALL_BURST_COUNT,
+                Color::srgba(1.0, 0.95, 0.70, 0.92),
+                Color::srgba(1.0, 0.62, 0.28, 0.88),
+                4.0,
+                11.0,
+                0.18,
+                12.0,
+                3.2,
+                0.05,
+                0.14,
+                0.16,
+                0.34,
+                rng_state,
+            );
+        }
+        (PlayerProjectileAudioKind::Bullet, PlayerProjectileImpactTarget::Ground) => {
+            spawn_radial_burst_particles(
+                commands,
+                "BulletGroundHitFx",
+                event.world_position,
+                FX_SMALL_BURST_COUNT,
+                Color::srgba(0.86, 0.78, 0.62, 0.75),
+                Color::srgba(0.56, 0.47, 0.38, 0.68),
+                2.5,
+                7.2,
+                0.28,
+                10.5,
+                3.8,
+                0.06,
+                0.18,
+                0.18,
+                0.42,
+                rng_state,
+            );
+        }
+        (PlayerProjectileAudioKind::Missile, PlayerProjectileImpactTarget::Enemy)
+        | (PlayerProjectileAudioKind::Missile, PlayerProjectileImpactTarget::Ground) => {
+            spawn_radial_burst_particles(
+                commands,
+                "MissileImpactBurstFx",
+                event.world_position,
+                FX_LARGE_BURST_COUNT,
+                Color::srgba(1.0, 0.86, 0.38, 0.96),
+                Color::srgba(0.94, 0.40, 0.18, 0.92),
+                5.5,
+                16.0,
+                0.20,
+                12.0,
+                2.8,
+                0.08,
+                0.22,
+                0.20,
+                0.48,
+                rng_state,
+            );
+            spawn_smoke_plume_particles(commands, event.world_position, 8, rng_state);
+        }
+    }
+}
+
+fn spawn_enemy_projectile_impact_particles(
+    commands: &mut Commands,
+    event: EnemyProjectileImpactEvent,
+    rng_state: &mut u64,
+) {
+    match event.kind {
+        EnemyProjectileImpactKind::Bomb => {
+            let burst_count = if event.target == EnemyProjectileImpactTarget::Ground {
+                FX_LARGE_BURST_COUNT + 8
+            } else {
+                FX_LARGE_BURST_COUNT
+            };
+            let gravity = if event.target == EnemyProjectileImpactTarget::Ground {
+                11.0
+            } else {
+                13.0
+            };
+            let upward_bias = if event.target == EnemyProjectileImpactTarget::Ground {
+                0.34
+            } else {
+                0.18
+            };
+            spawn_radial_burst_particles(
+                commands,
+                "EnemyBombImpactFx",
+                event.world_position,
+                burst_count,
+                Color::srgba(1.0, 0.82, 0.34, 0.96),
+                Color::srgba(0.92, 0.34, 0.16, 0.92),
+                5.0,
+                14.5,
+                upward_bias,
+                gravity,
+                2.9,
+                0.08,
+                0.22,
+                0.22,
+                0.54,
+                rng_state,
+            );
+            spawn_smoke_plume_particles(commands, event.world_position, 10, rng_state);
+        }
+        EnemyProjectileImpactKind::Missile => {
+            spawn_radial_burst_particles(
+                commands,
+                "EnemyMissileImpactFx",
+                event.world_position,
+                FX_MEDIUM_BURST_COUNT,
+                Color::srgba(1.0, 0.78, 0.32, 0.92),
+                Color::srgba(0.88, 0.36, 0.18, 0.90),
+                4.4,
+                12.2,
+                0.20,
+                12.0,
+                3.2,
+                0.06,
+                0.18,
+                0.18,
+                0.44,
+                rng_state,
+            );
+            spawn_smoke_plume_particles(commands, event.world_position, 6, rng_state);
+        }
+        EnemyProjectileImpactKind::Bullet => {
+            spawn_radial_burst_particles(
+                commands,
+                "EnemyBulletImpactFx",
+                event.world_position,
+                FX_SMALL_BURST_COUNT,
+                Color::srgba(1.0, 0.86, 0.58, 0.86),
+                Color::srgba(0.98, 0.54, 0.28, 0.82),
+                3.6,
+                9.0,
+                0.12,
+                12.5,
+                3.8,
+                0.05,
+                0.13,
+                0.14,
+                0.30,
+                rng_state,
+            );
+        }
+    }
+}
+
+fn spawn_enemy_death_particles(commands: &mut Commands, world_position: Vec2, rng_state: &mut u64) {
+    spawn_radial_burst_particles(
+        commands,
+        "EnemyDeathBurstFx",
+        world_position,
+        FX_LARGE_BURST_COUNT + 6,
+        Color::srgba(1.0, 0.86, 0.34, 0.96),
+        Color::srgba(0.94, 0.30, 0.16, 0.92),
+        5.2,
+        15.8,
+        0.16,
+        11.4,
+        2.7,
+        0.08,
+        0.24,
+        0.20,
+        0.56,
+        rng_state,
+    );
+    spawn_smoke_plume_particles(commands, world_position, 12, rng_state);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spawn_radial_burst_particles(
+    commands: &mut Commands,
+    name: &'static str,
+    world_position: Vec2,
+    count: usize,
+    color_a: Color,
+    color_b: Color,
+    speed_min: f32,
+    speed_max: f32,
+    upward_bias: f32,
+    gravity_mps2: f32,
+    drag_per_second: f32,
+    size_min: f32,
+    size_max: f32,
+    life_min_s: f32,
+    life_max_s: f32,
+    rng_state: &mut u64,
+) {
+    let color_a = color_a.to_srgba();
+    let color_b = color_b.to_srgba();
+    for _ in 0..count {
+        let angle = next_unit_random(rng_state) * TAU;
+        let mut direction = Vec2::new(angle.cos(), angle.sin() + upward_bias);
+        if direction.length_squared() <= f32::EPSILON {
+            direction = Vec2::Y;
+        } else {
+            direction = direction.normalize();
+        }
+        let speed = lerp(speed_min, speed_max, next_unit_random(rng_state));
+        let velocity = direction * speed;
+        let size = lerp(size_min, size_max, next_unit_random(rng_state));
+        let lifetime = lerp(life_min_s, life_max_s, next_unit_random(rng_state));
+        let mix_t = next_unit_random(rng_state);
+        let red = lerp(color_a.red, color_b.red, mix_t);
+        let green = lerp(color_a.green, color_b.green, mix_t);
+        let blue = lerp(color_a.blue, color_b.blue, mix_t);
+        let alpha = lerp(color_a.alpha, color_b.alpha, mix_t);
+
+        commands.spawn((
+            Name::new(name),
+            FeedbackParticle {
+                velocity_mps: velocity,
+                gravity_mps2,
+                drag_per_second,
+                remaining_s: lifetime,
+                total_s: lifetime,
+                initial_alpha: alpha,
+            },
+            Sprite::from_color(Color::srgba(red, green, blue, alpha), Vec2::splat(size)),
+            Transform::from_xyz(world_position.x, world_position.y, FEEDBACK_PARTICLE_Z_M + 0.03),
+        ));
+    }
+}
+
+fn spawn_smoke_plume_particles(
+    commands: &mut Commands,
+    world_position: Vec2,
+    count: usize,
+    rng_state: &mut u64,
+) {
+    for _ in 0..count {
+        let x_jitter = next_signed_unit_random(rng_state) * 0.45;
+        let y_jitter = next_unit_random(rng_state) * 0.24;
+        let vx = next_signed_unit_random(rng_state) * 1.9;
+        let vy = lerp(2.6, 7.2, next_unit_random(rng_state));
+        let size = lerp(0.12, 0.30, next_unit_random(rng_state));
+        let lifetime = lerp(0.28, 0.74, next_unit_random(rng_state));
+        let alpha = lerp(0.26, 0.52, next_unit_random(rng_state));
+        let shade = lerp(0.18, 0.36, next_unit_random(rng_state));
+
+        commands.spawn((
+            Name::new("ImpactSmokeFx"),
+            FeedbackParticle {
+                velocity_mps: Vec2::new(vx, vy),
+                gravity_mps2: 3.4,
+                drag_per_second: 1.8,
+                remaining_s: lifetime,
+                total_s: lifetime,
+                initial_alpha: alpha,
+            },
+            Sprite::from_color(Color::srgba(shade, shade, shade, alpha), Vec2::splat(size)),
+            Transform::from_xyz(
+                world_position.x + x_jitter,
+                world_position.y + y_jitter,
+                FEEDBACK_PARTICLE_Z_M + 0.04,
             ),
         ));
     }

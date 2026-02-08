@@ -69,6 +69,7 @@ impl Plugin for EnemyGameplayPlugin {
             .init_resource::<EnemyContactTracker>()
             .add_message::<PlayerDamageEvent>()
             .add_message::<PlayerEnemyCrashEvent>()
+            .add_message::<EnemyProjectileImpactEvent>()
             .add_systems(
                 OnEnter(GameState::InRun),
                 (reset_enemy_bootstrap, reset_enemy_contact_tracker),
@@ -241,6 +242,26 @@ pub struct PlayerDamageEvent {
 pub struct PlayerEnemyCrashEvent {
     pub player_speed_mps: f32,
     pub enemy_type_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnemyProjectileImpactKind {
+    Bullet,
+    Missile,
+    Bomb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnemyProjectileImpactTarget {
+    Ground,
+    Player,
+}
+
+#[derive(Message, Debug, Clone, Copy)]
+pub struct EnemyProjectileImpactEvent {
+    pub kind: EnemyProjectileImpactKind,
+    pub target: EnemyProjectileImpactTarget,
+    pub world_position: Vec2,
 }
 
 fn reset_enemy_bootstrap(mut bootstrap: ResMut<EnemyBootstrapState>) {
@@ -806,6 +827,7 @@ fn simulate_enemy_projectiles(
     mut commands: Commands,
     time: Res<Time>,
     config: Res<GameConfig>,
+    mut impact_writer: MessageWriter<EnemyProjectileImpactEvent>,
     mut projectile_query: Query<(Entity, &mut Transform, &mut EnemyProjectile)>,
 ) {
     let Some(environment) = config
@@ -834,6 +856,11 @@ fn simulate_enemy_projectiles(
 
         let ground_y = terrain_height_at_x(&config, transform.translation.x);
         if transform.translation.y <= ground_y {
+            impact_writer.write(EnemyProjectileImpactEvent {
+                kind: enemy_projectile_impact_kind(projectile.kind),
+                target: EnemyProjectileImpactTarget::Ground,
+                world_position: Vec2::new(transform.translation.x, ground_y),
+            });
             commands.entity(entity).try_despawn();
             continue;
         }
@@ -849,6 +876,7 @@ fn resolve_enemy_projectile_hits_player(
     mut commands: Commands,
     debug_guards: Option<Res<DebugGameplayGuards>>,
     mut player_damage_writer: MessageWriter<PlayerDamageEvent>,
+    mut impact_writer: MessageWriter<EnemyProjectileImpactEvent>,
     projectile_query: Query<(Entity, &Transform, &EnemyProjectile)>,
     mut player_query: Query<(&Transform, &mut PlayerHealth), With<PlayerVehicle>>,
 ) {
@@ -893,7 +921,7 @@ fn resolve_enemy_projectile_hits_player(
                     bomb_source_weight += hit_damage.max(0.001);
                 }
             }
-            consumed_projectiles.push(projectile_entity);
+            consumed_projectiles.push((projectile_entity, projectile.kind, projectile_position));
         }
     }
 
@@ -937,8 +965,21 @@ fn resolve_enemy_projectile_hits_player(
         }
     }
 
-    for projectile_entity in consumed_projectiles {
+    for (projectile_entity, projectile_kind, projectile_position) in consumed_projectiles {
+        impact_writer.write(EnemyProjectileImpactEvent {
+            kind: enemy_projectile_impact_kind(projectile_kind),
+            target: EnemyProjectileImpactTarget::Player,
+            world_position: projectile_position,
+        });
         commands.entity(projectile_entity).try_despawn();
+    }
+}
+
+fn enemy_projectile_impact_kind(kind: EnemyProjectileKind) -> EnemyProjectileImpactKind {
+    match kind {
+        EnemyProjectileKind::Bullet => EnemyProjectileImpactKind::Bullet,
+        EnemyProjectileKind::Missile => EnemyProjectileImpactKind::Missile,
+        EnemyProjectileKind::Bomb => EnemyProjectileImpactKind::Bomb,
     }
 }
 
