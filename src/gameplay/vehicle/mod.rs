@@ -2,8 +2,9 @@ use crate::assets::{AssetRegistry, ModelAssetEntry};
 use crate::config::GameConfig;
 use crate::debug::{DebugCameraPanState, DebugGameplayGuards};
 use crate::gameplay::combat::TurretTargetingState;
+use crate::gameplay::enemies::{Enemy, EnemyTypeId};
 use crate::states::GameState;
-use bevy::asset::{LoadState, RenderAssetUsages};
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
 use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::primitives::RegularPolygon;
@@ -88,6 +89,7 @@ const CAMERA_FOLLOW_SMOOTH_RATE_HZ: f32 = 10.0;
 const CAMERA_ZOOM_MIN_SCALE_METERS: f32 = CAMERA_ORTHO_SCALE_METERS * 0.84;
 const CAMERA_ZOOM_MAX_SCALE_METERS: f32 = CAMERA_ORTHO_SCALE_METERS * 1.18;
 const CAMERA_ZOOM_SMOOTH_RATE_HZ: f32 = 3.6;
+const SEGMENT_BOSS_ENEMY_TYPE_ID: &str = "segment_boss_drone";
 const GROUND_MAX_ANGULAR_SPEED: f32 = 5.5;
 const REAR_TRACTION_ASSIST_FALLBACK_DISTANCE_M: f32 = 0.28;
 const AIR_ANGULAR_DAMPING: f32 = 0.96;
@@ -98,6 +100,8 @@ const MIN_DRIVEABLE_GROUND_NORMAL_Y: f32 = 0.55;
 const MIN_SUSPENSION_DOWN_ALIGNMENT: f32 = 0.28;
 const SUSPENSION_MAX_COMPRESSION_SPEED_MPS: f32 = 5.0;
 const SUSPENSION_MAX_REBOUND_SPEED_MPS: f32 = 1.8;
+const PLAYER_GROUND_EMBED_RECOVERY_THRESHOLD_M: f32 = 0.05;
+const PLAYER_GROUND_EMBED_RECOVERY_CLEARANCE_M: f32 = 0.03;
 const WHEELIE_ANGLE_THRESHOLD_DEG: f32 = 20.0;
 const WHEELIE_MIN_SPEED_MPS: f32 = 2.0;
 const CRASH_LANDING_SPEED_THRESHOLD_MPS: f32 = 9.0;
@@ -166,6 +170,7 @@ impl Plugin for VehicleGameplayPlugin {
                     #[cfg(feature = "gaussian_splats")]
                     sort_splat_background_by_z_once,
                     apply_vehicle_kinematics,
+                    recover_player_from_ground_embed,
                     configure_player_vehicle_model_visuals,
                     spin_wheel_pairs,
                     sync_player_vehicle_visual_aim_and_model_wheels,
@@ -230,12 +235,6 @@ struct SplatBackgroundCamera {
 }
 
 #[derive(Component)]
-struct GroundSplineSegment {
-    x0: f32,
-    x1: f32,
-}
-
-#[derive(Component)]
 struct GroundPhysicsCollider;
 
 #[derive(Component)]
@@ -274,8 +273,6 @@ struct PlayerWheelPairVisual {
 
 #[derive(Component, Debug, Clone)]
 struct PlayerVehicleModelScene {
-    model_id: String,
-    scene_path: String,
     expected_root_node: String,
     expected_wheel_nodes: Vec<String>,
     expected_turret_node: Option<String>,

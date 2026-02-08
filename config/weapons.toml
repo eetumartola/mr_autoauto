@@ -47,6 +47,22 @@ missile_gravity_scale = 1.0
 homing_turn_rate_degrees = 0.0
 
 [[weapons]]
+id = "enemy_boss_spread"
+projectile_type = "bullet"
+bullet_speed = 23.0
+fire_rate = 0.7
+spread_degrees = 2.0
+damage = 4.0
+burst_count = 1
+burst_interval_seconds = 0.0
+muzzle_offset_x = 1.4
+muzzle_offset_y = 0.1
+projectile_drag = 0.02
+projectile_lifetime_seconds = 2.6
+missile_gravity_scale = 1.0
+homing_turn_rate_degrees = 0.0
+
+[[weapons]]
 id = "player_missile"
 projectile_type = "missile"
 bullet_speed = 21.0

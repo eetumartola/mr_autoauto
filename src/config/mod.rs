@@ -266,10 +266,10 @@ impl GameConfig {
             }
             if !matches!(
                 enemy.behavior.as_str(),
-                "walker" | "flier" | "turret" | "charger" | "bomber"
+                "walker" | "flier" | "turret" | "charger" | "bomber" | "boss"
             ) {
                 return Err(ConfigError::Validation(format!(
-                    "enemy_types.toml::enemy_types[{index}].behavior `{}` is unsupported (expected walker/flier/turret/charger/bomber)",
+                    "enemy_types.toml::enemy_types[{index}].behavior `{}` is unsupported (expected walker/flier/turret/charger/bomber/boss)",
                     enemy.behavior
                 )));
             }
@@ -956,6 +956,34 @@ impl GameConfig {
             .map(|(_, segment, _, _)| segment.id.as_str())
     }
 
+    pub fn active_segment_bounds_for_distance(
+        &self,
+        distance_m: f32,
+    ) -> Option<ActiveSegmentBounds<'_>> {
+        self.resolve_segment_at_distance(distance_m)
+            .map(|(index, segment, start_x, _)| ActiveSegmentBounds {
+                index,
+                id: segment.id.as_str(),
+                start_x,
+                end_x: start_x + segment.length.max(0.0),
+            })
+    }
+
+    pub fn segment_start_x_for_index(&self, segment_index: usize) -> Option<f32> {
+        if segment_index >= self.segments.segment_sequence.len() {
+            return None;
+        }
+
+        let mut cursor = 0.0_f32;
+        for (index, segment) in self.segments.segment_sequence.iter().enumerate() {
+            if index == segment_index {
+                return Some(cursor);
+            }
+            cursor += segment.length.max(0.0);
+        }
+        None
+    }
+
     pub fn terrain_height_at_x(&self, x: f32) -> f32 {
         let terrain = &self.game.terrain;
         let default_waves = TerrainWaveParams::from_terrain(terrain);
@@ -1048,6 +1076,14 @@ struct TerrainWaveParams {
     wave_b_frequency: f32,
     wave_c_amplitude: f32,
     wave_c_frequency: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ActiveSegmentBounds<'a> {
+    pub index: usize,
+    pub id: &'a str,
+    pub start_x: f32,
+    pub end_x: f32,
 }
 
 impl TerrainWaveParams {

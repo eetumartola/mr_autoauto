@@ -6,139 +6,19 @@ pub(super) fn request_vehicle_model_scene_dump_hotkey(
 ) {
     if keyboard.just_pressed(KeyCode::KeyN) {
         state.dump_requested = true;
-        info!("Vehicle model debug: dump requested (N).");
     }
 }
 
 pub(super) fn dump_loaded_vehicle_model_scene_info(
-    asset_server: Res<AssetServer>,
-    mut scenes: ResMut<Assets<Scene>>,
+    _asset_server: Res<AssetServer>,
+    _scenes: ResMut<Assets<Scene>>,
     mut state: ResMut<VehicleModelDebugState>,
-    model_scene_query: Query<&PlayerVehicleModelScene>,
+    _model_scene_query: Query<&PlayerVehicleModelScene>,
 ) {
     if !state.dump_requested {
         return;
     }
-
-    let mut dumped_any = false;
-    for model in &model_scene_query {
-        let scene_handle: Handle<Scene> = asset_server.load(model.scene_path.clone());
-        let is_loaded = asset_server.is_loaded_with_dependencies(scene_handle.id());
-        let is_failed = matches!(
-            asset_server.load_state(scene_handle.id()),
-            LoadState::Failed(_)
-        );
-        if is_failed {
-            warn!(
-                "Vehicle model debug: failed loading scene `{}` (model id `{}`).",
-                model.scene_path, model.model_id
-            );
-            continue;
-        }
-        if !is_loaded {
-            continue;
-        }
-
-        let Some(scene) = scenes.get_mut(&scene_handle) else {
-            continue;
-        };
-
-        log_vehicle_model_scene_report(model, scene);
-        dumped_any = true;
-    }
-
-    if !dumped_any {
-        info!("Vehicle model debug: model scene is not ready yet.");
-    }
-
     state.dump_requested = false;
-}
-
-fn log_vehicle_model_scene_report(model: &PlayerVehicleModelScene, scene: &mut Scene) {
-    const MAX_LOGGED_ENTITIES: usize = 256;
-
-    #[derive(Debug)]
-    struct SceneRow {
-        entity_index: u32,
-        name: String,
-        translation: Vec3,
-        rotation_deg: f32,
-        scale: Vec3,
-    }
-
-    let mut found_names = HashSet::<String>::new();
-    let mut rows = Vec::<SceneRow>::new();
-    let mut query = scene.world.query::<EntityRef>();
-    for entity_ref in query.iter(&scene.world).take(MAX_LOGGED_ENTITIES) {
-        let entity = entity_ref.id();
-        let name = entity_ref.get::<Name>();
-        let transform = entity_ref.get::<Transform>();
-        let name_string = name
-            .map(|value| value.as_str().to_string())
-            .unwrap_or_else(|| "<unnamed>".to_string());
-        if let Some(value) = name {
-            found_names.insert(value.as_str().to_string());
-        }
-        let (translation, rotation_deg, scale) = transform
-            .map(|value| {
-                (
-                    value.translation,
-                    value.rotation.to_euler(EulerRot::XYZ).2.to_degrees(),
-                    value.scale,
-                )
-            })
-            .unwrap_or((Vec3::ZERO, 0.0, Vec3::ONE));
-        rows.push(SceneRow {
-            entity_index: entity.index(),
-            name: name_string,
-            translation,
-            rotation_deg,
-            scale,
-        });
-    }
-    rows.sort_by_key(|row| row.entity_index);
-
-    info!(
-        "Vehicle model scene dump: id=`{}`, scene=`{}`, entities_logged={}",
-        model.model_id,
-        model.scene_path,
-        rows.len()
-    );
-    for row in &rows {
-        info!(
-            "  entity[{}] name=`{}` t=({:.3}, {:.3}, {:.3}) rot_z={:.2}deg s=({:.3}, {:.3}, {:.3})",
-            row.entity_index,
-            row.name,
-            row.translation.x,
-            row.translation.y,
-            row.translation.z,
-            row.rotation_deg,
-            row.scale.x,
-            row.scale.y,
-            row.scale.z
-        );
-    }
-
-    let root_ok = found_names.contains(model.expected_root_node.as_str());
-    let missing_wheels: Vec<&str> = model
-        .expected_wheel_nodes
-        .iter()
-        .map(String::as_str)
-        .filter(|name| !found_names.contains(*name))
-        .collect();
-    let turret_ok = model
-        .expected_turret_node
-        .as_ref()
-        .map(|name| found_names.contains(name.as_str()))
-        .unwrap_or(true);
-    info!(
-        "Vehicle model expected nodes: root `{}`={} wheels missing={:?} turret={:?} ok={}",
-        model.expected_root_node,
-        if root_ok { "found" } else { "missing" },
-        missing_wheels,
-        model.expected_turret_node,
-        if turret_ok { "found/unused" } else { "missing" }
-    );
 }
 
 #[allow(clippy::type_complexity)]
@@ -217,7 +97,6 @@ pub(super) fn configure_player_vehicle_model_visuals(
             };
             let center = (wheel_min + wheel_max) * 0.5;
             wheel_nodes.push(MatchedModelWheelNode {
-                name: expected_wheel.clone(),
                 center,
                 min: wheel_min,
                 max: wheel_max,
@@ -352,7 +231,7 @@ pub(super) fn configure_player_vehicle_model_visuals(
         scene_transform.rotation = model_rotation;
         scene_transform.scale = Vec3::splat(scale);
 
-        if let Some((turret_name, turret_entity, turret_local_transform, turret_min, turret_max)) =
+        if let Some((_turret_name, turret_entity, turret_local_transform, turret_min, turret_max)) =
             turret_bounds.as_ref()
         {
             let turret_pivot = Vec3::new(
@@ -360,11 +239,6 @@ pub(super) fn configure_player_vehicle_model_visuals(
                 turret_min.y,
                 (turret_min.z + turret_max.z) * 0.5,
             );
-            info!(
-                "Vehicle model setup: turret node `{}` pivot suggestion (mid-low-face) = ({:.3}, {:.3}, {:.3})",
-                turret_name, turret_pivot.x, turret_pivot.y, turret_pivot.z
-            );
-
             if let Some(local_transform) = *turret_local_transform {
                 let aim_axis_local = (local_transform.rotation.inverse() * scene_out_of_plane_axis)
                     .normalize_or_zero();
@@ -382,22 +256,6 @@ pub(super) fn configure_player_vehicle_model_visuals(
                         },
                     });
             }
-        }
-
-        for wheel in &wheel_nodes {
-            info!(
-                "Vehicle model setup: wheel node `{}` pivot suggestion (bbox center) = ({:.3}, {:.3}, {:.3}) | bounds min=({:.3}, {:.3}, {:.3}) max=({:.3}, {:.3}, {:.3})",
-                wheel.name,
-                wheel.center.x,
-                wheel.center.y,
-                wheel.center.z,
-                wheel.min.x,
-                wheel.min.y,
-                wheel.min.z,
-                wheel.max.x,
-                wheel.max.y,
-                wheel.max.z
-            );
         }
 
         for wheel in &wheel_nodes {
@@ -432,21 +290,6 @@ pub(super) fn configure_player_vehicle_model_visuals(
                 });
         }
 
-        info!(
-            "Vehicle model setup: applied scale {:.3} (wheelbase {:.3}, forward {:.3}, up {:.3}), rotation(deg)=({:.1}, {:.1}, {:.1}), local offset ({:.3}, {:.3}, {:.3}) from chassis node `{}`.",
-            scale,
-            wheelbase_scale,
-            forward_scale,
-            up_scale,
-            scene_transform.rotation.to_euler(EulerRot::XYZ).0.to_degrees(),
-            scene_transform.rotation.to_euler(EulerRot::XYZ).1.to_degrees(),
-            scene_transform.rotation.to_euler(EulerRot::XYZ).2.to_degrees(),
-            scene_transform.translation.x,
-            scene_transform.translation.y,
-            scene_transform.translation.z,
-            model.expected_root_node
-        );
-
         runtime.configured = true;
     }
 }
@@ -474,7 +317,6 @@ struct ModelSceneNodeSnapshot {
 
 #[derive(Clone)]
 struct MatchedModelWheelNode {
-    name: String,
     center: Vec3,
     min: Vec3,
     max: Vec3,

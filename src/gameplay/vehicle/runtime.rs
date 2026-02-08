@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn update_ground_spline_segments(
     config: Res<GameConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut collider_query: Query<(&GroundSplineSegment, &mut Collider), With<GroundPhysicsCollider>>,
+    mut collider_query: Query<&mut Collider, With<GroundPhysicsCollider>>,
     strip_query: Query<&Mesh2d, With<GroundStripVisual>>,
     curtain_query: Query<&Mesh2d, With<GroundCurtainVisual>>,
 ) {
@@ -25,10 +25,40 @@ pub(super) fn update_ground_spline_segments(
         }
     }
 
-    for (segment, mut collider) in &mut collider_query {
-        let top0 = Vec2::new(segment.x0, terrain_height_at_x(&config, segment.x0));
-        let top1 = Vec2::new(segment.x1, terrain_height_at_x(&config, segment.x1));
-        *collider = Collider::segment(top0, top1);
+    if let Ok(mut collider) = collider_query.single_mut() {
+        let collider_polyline = profile.points.iter().map(|point| point.top).collect();
+        *collider = Collider::polyline(collider_polyline, None);
+    }
+}
+
+pub(super) fn recover_player_from_ground_embed(
+    config: Res<GameConfig>,
+    mut player_query: Query<(&mut Transform, &mut Velocity, &GroundContact), With<PlayerVehicle>>,
+) {
+    let Ok((mut transform, mut velocity, contact)) = player_query.single_mut() else {
+        return;
+    };
+
+    if !contact.grounded {
+        return;
+    }
+
+    let terrain_y = terrain_height_at_x(&config, transform.translation.x);
+    let half_extents = Vec2::new(PLAYER_CHASSIS_SIZE.x * 0.48, PLAYER_CHASSIS_SIZE.y * 0.36);
+    let (_, _, rotation_rad) = transform.rotation.to_euler(EulerRot::XYZ);
+    let right_axis_y = rotation_rad.sin().abs();
+    let up_axis_y = rotation_rad.cos().abs();
+    let lowest_chassis_y =
+        transform.translation.y - (half_extents.x * right_axis_y) - (half_extents.y * up_axis_y);
+
+    let penetration = (terrain_y - lowest_chassis_y).max(0.0);
+    if penetration <= PLAYER_GROUND_EMBED_RECOVERY_THRESHOLD_M {
+        return;
+    }
+
+    transform.translation.y += penetration + PLAYER_GROUND_EMBED_RECOVERY_CLEARANCE_M;
+    if velocity.linvel.y < 0.0 {
+        velocity.linvel.y = 0.0;
     }
 }
 
@@ -504,6 +534,7 @@ pub(super) fn camera_follow_vehicle(
     debug_camera_pan: Option<Res<DebugCameraPanState>>,
     mut follow_state: ResMut<CameraFollowState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
+    enemy_query: Query<(&Transform, &EnemyTypeId), (With<Enemy>, Without<Camera2d>)>,
     mut camera_query: Query<
         (&mut Transform, &mut Projection),
         (With<Camera2d>, Without<PlayerVehicle>),
@@ -519,6 +550,19 @@ pub(super) fn camera_follow_vehicle(
     let Ok((mut camera_transform, mut camera_projection)) = camera_query.single_mut() else {
         return;
     };
+    let boss_camera_limit_x = enemy_query
+        .iter()
+        .filter_map(|(transform, enemy_type_id)| {
+            (enemy_type_id.0 == SEGMENT_BOSS_ENEMY_TYPE_ID).then_some(transform.translation.x)
+        })
+        .min_by(|left, right| left.total_cmp(right));
+    let clamp_camera_x = |x: f32| -> f32 {
+        if let Some(limit_x) = boss_camera_limit_x {
+            x.min(limit_x)
+        } else {
+            x
+        }
+    };
     let pan_offset = debug_camera_pan.map(|pan| pan.offset_x_m).unwrap_or(0.0);
     let target_look_ahead_m = (telemetry.speed_mps * vehicle.camera_look_ahead_factor)
         .clamp(vehicle.camera_look_ahead_min, vehicle.camera_look_ahead_max);
@@ -527,21 +571,23 @@ pub(super) fn camera_follow_vehicle(
     if !follow_state.initialized {
         follow_state.initialized = true;
         follow_state.look_ahead_m = target_look_ahead_m;
-        camera_transform.translation.x =
-            player_transform.translation.x + target_look_ahead_m + pan_offset;
+        let target_camera_x = player_transform.translation.x + target_look_ahead_m + pan_offset;
+        camera_transform.translation.x = clamp_camera_x(target_camera_x);
     } else {
         follow_state.look_ahead_m = move_towards(
             follow_state.look_ahead_m,
             target_look_ahead_m,
             max_look_ahead_step,
         );
-        let target_camera_x =
+        let unclamped_target_camera_x =
             player_transform.translation.x + follow_state.look_ahead_m + pan_offset;
+        let target_camera_x = clamp_camera_x(unclamped_target_camera_x);
         let camera_blend = (CAMERA_FOLLOW_SMOOTH_RATE_HZ * dt).clamp(0.0, 1.0);
-        camera_transform.translation.x = camera_transform
+        let blended_camera_x = camera_transform
             .translation
             .x
             .lerp(target_camera_x, camera_blend);
+        camera_transform.translation.x = clamp_camera_x(blended_camera_x);
     }
     camera_transform.translation.y = CAMERA_Y;
     camera_transform.translation.z = CAMERA_Z;

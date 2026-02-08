@@ -296,8 +296,11 @@ environment = "ice"
   - distance-based triggers, timed spawns, max alive, cooldown.
 - [not started] D5. Difficulty scaling:
   - scale spawn rate/health/damage with distance and per-segment multiplier.
-- [not started] D6. Boss v0:
-  - big enemy with phases: spawn adds, fire pattern, weak spot (optional).
+- [in progress] D6. Boss v0:
+  - [done] Segment boss trigger: when player reaches `segment_end - 20m`, spawn a boss encounter enemy for that segment.
+  - [done] Added first boss archetype `segment_boss_drone` (drone-derived, larger HP/size, right-half screen behavior, spread fire).
+  - [done] Boss defeat transition: killing the segment boss teleports player to the next segment start and resets local encounter flow.
+  - [not started] Optional phase logic (adds/weak-spot) if needed after baseline pacing validation.
 
 **DoD**
 - Multiple enemy types appear across distance; boss encounter is possible and ends a segment cleanly.
@@ -467,7 +470,7 @@ environment = "ice"
 - Ground pipeline decision: move formal ground authoring/import workflow to end of Epic E.
 - Terrain representation decision:
   - replaced jagged tower ground with spline-strip terrain.
-  - render continuous strip + curtain meshes; physics uses strip-top segment colliders.
+  - render continuous strip + curtain meshes; physics uses a single strip-top line-strip/polyline collider (no per-segment collider seams).
 - Combat readability decisions:
   - always render blue target line + green cone boundaries.
   - target cone defaults to 60 degrees and remains configurable/upgradable.
@@ -490,6 +493,14 @@ environment = "ice"
   - HP zero transitions to `Results`.
   - scoring uses distance + kills + stunts + bonuses from TOML.
   - upgrade offers trigger by coin milestones and pause gameplay for selection.
+- Segment pacing decision:
+  - segment lengths set to `castle=512m`, `mythical=1024m`.
+  - boss encounter triggers 20m before segment end.
+  - defeating the boss advances/teleports run to the next segment start.
+- Boss camera gate decision:
+  - while a segment boss is alive, gameplay camera x is clamped to not pan past the boss.
+- Restart flow decision:
+  - `Space` from Results returns to `Loading` and reuses the startup asset-readiness gate before entering `InRun`.
 - Upgrade UX decision: two random choices, selected with left/right controls, requiring a fresh keypress after panel opens.
 - Stability policy:
   - prefer disjoint queries/`Without`/combined-query patterns to avoid Bevy `B0001` conflicts.

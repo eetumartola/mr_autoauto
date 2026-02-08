@@ -21,6 +21,18 @@ hover_amplitude = 1.8
 hover_frequency = 1.35
 
 [[enemy_types]]
+id = "segment_boss_drone"
+behavior = "boss"
+health = 220.0
+speed = 3.2
+contact_damage = 6.0
+kill_score = 260
+weapon_id = "enemy_boss_spread"
+hitbox_radius = 3.51
+hover_amplitude = 1.4
+hover_frequency = 0.18
+
+[[enemy_types]]
 id = "roadside_turret"
 behavior = "turret"
 health = 36.0

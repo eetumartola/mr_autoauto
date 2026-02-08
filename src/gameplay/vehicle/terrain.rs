@@ -8,18 +8,9 @@ pub(super) struct GroundProfilePoint {
     pub(super) u: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct GroundColliderSegmentSample {
-    pub(super) x0: f32,
-    pub(super) x1: f32,
-    pub(super) top0: Vec2,
-    pub(super) top1: Vec2,
-}
-
 #[derive(Debug, Clone)]
 pub(super) struct GroundProfileSamples {
     pub(super) points: Vec<GroundProfilePoint>,
-    pub(super) segments: Vec<GroundColliderSegmentSample>,
 }
 
 pub(super) fn build_ground_profile_samples(config: &GameConfig) -> GroundProfileSamples {
@@ -64,19 +55,7 @@ pub(super) fn build_ground_profile_samples(config: &GameConfig) -> GroundProfile
         });
     }
 
-    let mut segments = Vec::with_capacity(segment_count);
-    for pair in points.windows(2) {
-        let left = pair[0];
-        let right = pair[1];
-        segments.push(GroundColliderSegmentSample {
-            x0: left.x,
-            x1: right.x,
-            top0: left.top,
-            top1: right.top,
-        });
-    }
-
-    GroundProfileSamples { points, segments }
+    GroundProfileSamples { points }
 }
 
 pub(super) fn build_ground_strip_mesh(profile: &GroundProfileSamples) -> Mesh {

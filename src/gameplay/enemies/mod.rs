@@ -22,6 +22,7 @@ const ENEMY_HP_BAR_FILL_HEIGHT_M: f32 = 0.16;
 const ENEMY_HP_BAR_Z_M: f32 = 0.9;
 const ENEMY_HIT_FLASH_DURATION_S: f32 = 0.12;
 const ENEMY_ATTACK_RANGE_M: f32 = 38.0;
+const BOSS_ATTACK_RANGE_M: f32 = 92.0;
 const ENEMY_BOMBER_DROP_RANGE_M: f32 = 8.5;
 const ENEMY_FLIER_ARC_ANGLE_RAD: f32 = 0.28;
 const ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD: f32 = 0.16;
@@ -60,6 +61,18 @@ const ENEMY_WALKER_UPHILL_SPEED_BOOST: f32 = 1.35;
 const ENEMY_CHARGER_UPHILL_SPEED_BOOST: f32 = 1.5;
 const ENEMY_WALKER_GROUND_FOLLOW_RATE: f32 = 18.0;
 const ENEMY_CHARGER_GROUND_FOLLOW_RATE: f32 = 20.0;
+const SEGMENT_BOSS_TRIGGER_BEFORE_END_M: f32 = 20.0;
+const SEGMENT_BOSS_ENEMY_ID: &str = "segment_boss_drone";
+const SEGMENT_BOSS_ENTRY_OFFSET_M: f32 = 6.0;
+const BOSS_RIGHT_HALF_MIN_AHEAD_M: f32 = 24.0;
+const BOSS_RIGHT_HALF_MAX_AHEAD_M: f32 = 108.0;
+const BOSS_RIGHT_HALF_TARGET_AHEAD_M: f32 = 66.0;
+const BOSS_STRAFE_AMPLITUDE_M: f32 = 16.0;
+const BOSS_STRAFE_FREQUENCY_HZ: f32 = 0.11;
+const BOSS_HOVER_FREQUENCY_HZ: f32 = 0.16;
+const BOSS_TRACK_X_GAIN: f32 = 2.8;
+const BOSS_TRACK_Y_GAIN: f32 = 3.4;
+const BOSS_BASE_ALTITUDE_MIN_M: f32 = 7.5;
 
 pub struct EnemyGameplayPlugin;
 
@@ -67,17 +80,24 @@ impl Plugin for EnemyGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<EnemyBootstrapState>()
             .init_resource::<EnemyContactTracker>()
+            .init_resource::<SegmentBossEncounterState>()
             .add_message::<PlayerDamageEvent>()
             .add_message::<PlayerEnemyCrashEvent>()
             .add_message::<EnemyProjectileImpactEvent>()
             .add_systems(
                 OnEnter(GameState::InRun),
-                (reset_enemy_bootstrap, reset_enemy_contact_tracker),
+                (
+                    reset_enemy_bootstrap,
+                    reset_enemy_contact_tracker,
+                    reset_segment_boss_state,
+                ),
             )
             .add_systems(OnExit(GameState::InRun), cleanup_enemy_run_entities)
             .add_systems(
                 Update,
                 (
+                    sync_segment_boss_state,
+                    trigger_segment_boss_encounter,
                     spawn_bootstrap_enemies,
                     configure_enemy_model_visuals,
                     update_enemy_behaviors,
@@ -85,6 +105,7 @@ impl Plugin for EnemyGameplayPlugin {
                     simulate_enemy_projectiles,
                     resolve_enemy_projectile_hits_player,
                     apply_enemy_contact_damage_to_player,
+                    handle_segment_boss_defeat_transition,
                     update_enemy_hit_flash_effects,
                     update_enemy_fade_out_fx,
                     update_enemy_health_bars,
@@ -210,6 +231,7 @@ enum EnemyBehaviorKind {
     Turret,
     Charger,
     Bomber,
+    Boss,
 }
 
 #[derive(Resource, Debug, Default)]
@@ -221,6 +243,31 @@ struct EnemyBootstrapState {
 #[derive(Resource, Debug, Default)]
 struct EnemyContactTracker {
     currently_colliding: HashSet<Entity>,
+}
+
+#[derive(Resource, Debug, Clone)]
+struct SegmentBossEncounterState {
+    active_segment_index: usize,
+    active_segment_id: String,
+    active_segment_start_x: f32,
+    active_segment_end_x: f32,
+    boss_trigger_x: f32,
+    boss_spawned_for_segment: bool,
+    boss_alive: bool,
+}
+
+impl Default for SegmentBossEncounterState {
+    fn default() -> Self {
+        Self {
+            active_segment_index: 0,
+            active_segment_id: String::new(),
+            active_segment_start_x: 0.0,
+            active_segment_end_x: 0.0,
+            boss_trigger_x: 0.0,
+            boss_spawned_for_segment: false,
+            boss_alive: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -272,6 +319,103 @@ fn reset_enemy_contact_tracker(mut tracker: ResMut<EnemyContactTracker>) {
     tracker.currently_colliding.clear();
 }
 
+fn reset_segment_boss_state(mut boss_state: ResMut<SegmentBossEncounterState>) {
+    *boss_state = SegmentBossEncounterState::default();
+}
+
+fn sync_segment_boss_state(
+    config: Res<GameConfig>,
+    mut boss_state: ResMut<SegmentBossEncounterState>,
+    player_query: Query<&Transform, With<PlayerVehicle>>,
+) {
+    let Ok(player_transform) = player_query.single() else {
+        return;
+    };
+    let player_x = player_transform.translation.x.max(0.0);
+    let Some(segment_bounds) = config.active_segment_bounds_for_distance(player_x) else {
+        return;
+    };
+
+    let segment_changed = boss_state.active_segment_id != segment_bounds.id
+        || boss_state.active_segment_index != segment_bounds.index;
+    if segment_changed {
+        boss_state.active_segment_index = segment_bounds.index;
+        boss_state.active_segment_id = segment_bounds.id.to_string();
+        boss_state.active_segment_start_x = segment_bounds.start_x;
+        boss_state.active_segment_end_x = segment_bounds.end_x;
+        boss_state.boss_trigger_x =
+            (segment_bounds.end_x - SEGMENT_BOSS_TRIGGER_BEFORE_END_M).max(segment_bounds.start_x);
+        boss_state.boss_spawned_for_segment = false;
+        boss_state.boss_alive = false;
+    } else if boss_state.active_segment_end_x <= boss_state.active_segment_start_x {
+        boss_state.active_segment_start_x = segment_bounds.start_x;
+        boss_state.active_segment_end_x = segment_bounds.end_x;
+        boss_state.boss_trigger_x =
+            (segment_bounds.end_x - SEGMENT_BOSS_TRIGGER_BEFORE_END_M).max(segment_bounds.start_x);
+    }
+}
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn trigger_segment_boss_encounter(
+    mut commands: Commands,
+    config: Res<GameConfig>,
+    asset_registry: Option<Res<AssetRegistry>>,
+    mut bootstrap: ResMut<EnemyBootstrapState>,
+    mut boss_state: ResMut<SegmentBossEncounterState>,
+    player_query: Query<&Transform, With<PlayerVehicle>>,
+    enemy_query: Query<Entity, With<Enemy>>,
+    enemy_projectile_query: Query<Entity, With<EnemyProjectile>>,
+) {
+    if boss_state.boss_spawned_for_segment {
+        return;
+    }
+
+    let Ok(player_transform) = player_query.single() else {
+        return;
+    };
+    let player_x = player_transform.translation.x.max(0.0);
+    if player_x < boss_state.boss_trigger_x {
+        return;
+    }
+
+    let Some(enemy_cfg) = config.enemy_types_by_id.get(SEGMENT_BOSS_ENEMY_ID) else {
+        warn!(
+            "Boss trigger reached for segment `{}`, but enemy type `{}` is missing.",
+            boss_state.active_segment_id, SEGMENT_BOSS_ENEMY_ID
+        );
+        boss_state.boss_spawned_for_segment = true;
+        boss_state.boss_alive = false;
+        return;
+    };
+
+    for enemy_entity in &enemy_query {
+        commands.entity(enemy_entity).try_despawn();
+    }
+    for projectile_entity in &enemy_projectile_query {
+        commands.entity(projectile_entity).try_despawn();
+    }
+
+    let spawn_x = boss_state.boss_trigger_x;
+
+    spawn_enemy_instance(
+        &mut commands,
+        &config,
+        asset_registry.as_deref(),
+        enemy_cfg,
+        spawn_x,
+        bootstrap.wave_counter,
+    );
+    bootstrap.wave_counter = bootstrap.wave_counter.saturating_add(1);
+    bootstrap.seeded = true;
+    boss_state.boss_spawned_for_segment = true;
+    boss_state.boss_alive = true;
+
+    info!(
+        "Segment boss spawned: segment=`{}` trigger_x={:.1} spawn_x={:.1}.",
+        boss_state.active_segment_id, boss_state.boss_trigger_x, spawn_x
+    );
+}
+
 #[allow(clippy::type_complexity)]
 fn cleanup_enemy_run_entities(
     mut commands: Commands,
@@ -296,9 +440,10 @@ fn spawn_bootstrap_enemies(
     config: Res<GameConfig>,
     asset_registry: Option<Res<AssetRegistry>>,
     mut bootstrap: ResMut<EnemyBootstrapState>,
+    boss_state: Res<SegmentBossEncounterState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
 ) {
-    if bootstrap.seeded {
+    if bootstrap.seeded || boss_state.boss_alive {
         return;
     }
 
@@ -310,24 +455,31 @@ fn spawn_bootstrap_enemies(
         return;
     }
 
-    for (index, enemy_cfg) in config.enemy_types.enemy_types.iter().enumerate() {
+    let mut spawned_count = 0_u32;
+    for enemy_cfg in &config.enemy_types.enemy_types {
+        if behavior_kind_from_config(enemy_cfg.behavior.as_str()) == EnemyBehaviorKind::Boss
+            || enemy_cfg.id == SEGMENT_BOSS_ENEMY_ID
+        {
+            continue;
+        }
         let spawn_x = player_transform.translation.x
             + ENEMY_SPAWN_START_AHEAD_M
-            + (index as f32 * ENEMY_SPAWN_SPACING_M);
+            + (spawned_count as f32 * ENEMY_SPAWN_SPACING_M);
         spawn_enemy_instance(
             &mut commands,
             &config,
             asset_registry.as_deref(),
             enemy_cfg,
             spawn_x,
-            bootstrap.wave_counter + index as u32,
+            bootstrap.wave_counter + spawned_count,
         );
+        spawned_count = spawned_count.saturating_add(1);
     }
 
-    bootstrap.wave_counter = bootstrap
-        .wave_counter
-        .saturating_add(config.enemy_types.enemy_types.len() as u32);
-    bootstrap.seeded = true;
+    if spawned_count > 0 {
+        bootstrap.wave_counter = bootstrap.wave_counter.saturating_add(spawned_count);
+        bootstrap.seeded = true;
+    }
 }
 
 fn spawn_enemy_instance(
@@ -353,6 +505,9 @@ fn spawn_enemy_instance(
                     .max(ENEMY_BOMBER_ALTITUDE_DEFAULT_M)
                     * ENEMY_BOMBER_ALTITUDE_SCALE)
         }
+        EnemyBehaviorKind::Boss => {
+            ground_y + enemy_cfg.hover_amplitude.max(BOSS_BASE_ALTITUDE_MIN_M)
+        }
         _ => ground_y,
     };
 
@@ -361,11 +516,12 @@ fn spawn_enemy_instance(
             base_altitude + phase_offset.sin() * enemy_cfg.hover_amplitude.max(0.5)
         }
         EnemyBehaviorKind::Bomber => base_altitude,
+        EnemyBehaviorKind::Boss => base_altitude,
         _ => ground_y,
     };
     let enemy_mass = enemy_mass_from_hitbox(enemy_cfg.hitbox_radius);
     let gravity_scale = match behavior_kind {
-        EnemyBehaviorKind::Flier | EnemyBehaviorKind::Bomber => 0.0,
+        EnemyBehaviorKind::Flier | EnemyBehaviorKind::Bomber | EnemyBehaviorKind::Boss => 0.0,
         _ => 1.0,
     };
     let gameplay_box_color = body_color.with_alpha(ENEMY_GAMEPLAY_BOX_ALPHA);
@@ -579,6 +735,7 @@ fn configure_enemy_model_visuals(
 fn update_enemy_behaviors(
     time: Res<Time>,
     config: Res<GameConfig>,
+    boss_state: Res<SegmentBossEncounterState>,
     player_query: Query<&Transform, (With<PlayerVehicle>, Without<Enemy>)>,
     mut enemy_query: Query<
         (
@@ -671,12 +828,37 @@ fn update_enemy_behaviors(
                 let target_y = behavior.base_altitude_m + cruise_wave;
                 desired_velocity.y = (target_y - enemy_position.y) * 4.0;
             }
+            EnemyBehaviorKind::Boss => {
+                if transform.translation.x < boss_state.boss_trigger_x {
+                    transform.translation.x = boss_state.boss_trigger_x;
+                    velocity.linvel.x = velocity.linvel.x.max(0.0);
+                }
+                let right_half_min_x =
+                    (player_x + BOSS_RIGHT_HALF_MIN_AHEAD_M).max(boss_state.boss_trigger_x);
+                let right_half_max_x =
+                    (player_x + BOSS_RIGHT_HALF_MAX_AHEAD_M).max(right_half_min_x);
+                let strafe = ((behavior.elapsed_s * BOSS_STRAFE_FREQUENCY_HZ * TAU)
+                    + behavior.phase_offset_rad)
+                    .sin()
+                    * BOSS_STRAFE_AMPLITUDE_M;
+                let target_x = (player_x + BOSS_RIGHT_HALF_TARGET_AHEAD_M + strafe)
+                    .clamp(right_half_min_x, right_half_max_x);
+                desired_velocity.x = (target_x - enemy_position.x) * BOSS_TRACK_X_GAIN;
+
+                let hover = ((behavior.elapsed_s * BOSS_HOVER_FREQUENCY_HZ * TAU)
+                    + behavior.phase_offset_rad * 0.75)
+                    .sin()
+                    * behavior.hover_amplitude_m.max(1.5);
+                let target_y = behavior.base_altitude_m + hover;
+                desired_velocity.y = (target_y - enemy_position.y) * BOSS_TRACK_Y_GAIN;
+            }
         }
 
         let response_hz = match behavior.kind {
             EnemyBehaviorKind::Walker => ENEMY_WALKER_VELOCITY_RESPONSE_HZ,
             EnemyBehaviorKind::Charger => ENEMY_CHARGER_VELOCITY_RESPONSE_HZ,
             EnemyBehaviorKind::Bomber => ENEMY_BOMBER_VELOCITY_RESPONSE_HZ,
+            EnemyBehaviorKind::Boss => ENEMY_BOMBER_VELOCITY_RESPONSE_HZ,
             _ => ENEMY_DEFAULT_VELOCITY_RESPONSE_HZ,
         };
         let smooth = (response_hz * dt).clamp(0.0, 1.0);
@@ -729,6 +911,11 @@ fn fire_enemy_projectiles(
         let enemy_position = enemy_transform.translation.truncate();
         let to_player = player_position - enemy_position;
         let distance_to_player_m = to_player.length();
+        let attack_range_m = if behavior.kind == EnemyBehaviorKind::Boss {
+            BOSS_ATTACK_RANGE_M
+        } else {
+            ENEMY_ATTACK_RANGE_M
+        };
         let fire_cooldown_s =
             (1.0 / weapon.fire_rate.max(MIN_ENEMY_FIRE_RATE_HZ)).max(MIN_ENEMY_FIRE_COOLDOWN_S);
 
@@ -753,7 +940,7 @@ fn fire_enemy_projectiles(
             continue;
         }
 
-        if distance_to_player_m <= 0.001 || distance_to_player_m > ENEMY_ATTACK_RANGE_M {
+        if distance_to_player_m <= 0.001 || distance_to_player_m > attack_range_m {
             attack_state.cooldown_s = fire_cooldown_s;
             continue;
         }
@@ -1087,10 +1274,104 @@ fn apply_enemy_contact_damage_to_player(
     }
 }
 
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+fn handle_segment_boss_defeat_transition(
+    mut commands: Commands,
+    config: Res<GameConfig>,
+    mut kill_events: MessageReader<EnemyKilledEvent>,
+    mut bootstrap: ResMut<EnemyBootstrapState>,
+    mut boss_state: ResMut<SegmentBossEncounterState>,
+    mut player_query: Query<
+        (
+            &mut Transform,
+            Option<&mut Velocity>,
+            Option<&mut ExternalForce>,
+        ),
+        With<PlayerVehicle>,
+    >,
+    enemy_query: Query<Entity, With<Enemy>>,
+    enemy_projectile_query: Query<Entity, With<EnemyProjectile>>,
+) {
+    if !boss_state.boss_alive {
+        return;
+    }
+
+    let mut boss_killed = false;
+    for kill in kill_events.read() {
+        if kill.enemy_type_id == SEGMENT_BOSS_ENEMY_ID {
+            boss_killed = true;
+        }
+    }
+    if !boss_killed {
+        return;
+    }
+
+    let previous_segment_id = boss_state.active_segment_id.clone();
+
+    let segment_count = config.segments.segment_sequence.len();
+    if segment_count == 0 {
+        return;
+    }
+    let next_segment_index = (boss_state.active_segment_index + 1) % segment_count;
+    let Some(next_segment_start_x) = config.segment_start_x_for_index(next_segment_index) else {
+        return;
+    };
+    let Some(next_segment_bounds) =
+        config.active_segment_bounds_for_distance(next_segment_start_x + 0.001)
+    else {
+        return;
+    };
+
+    let Ok((mut player_transform, player_velocity, player_external_force)) =
+        player_query.single_mut()
+    else {
+        return;
+    };
+    let previous_x = player_transform.translation.x;
+    let previous_ground_y = terrain_height_at_x(&config, previous_x);
+    let previous_clearance = (player_transform.translation.y - previous_ground_y).clamp(2.4, 16.0);
+    let target_x = next_segment_start_x + SEGMENT_BOSS_ENTRY_OFFSET_M;
+    let target_ground_y = terrain_height_at_x(&config, target_x);
+    player_transform.translation.x = target_x;
+    player_transform.translation.y = target_ground_y + previous_clearance;
+    player_transform.rotation = Quat::IDENTITY;
+
+    if let Some(mut velocity) = player_velocity {
+        velocity.linvel = Vec2::ZERO;
+        velocity.angvel = 0.0;
+    }
+    if let Some(mut external_force) = player_external_force {
+        external_force.force = Vec2::ZERO;
+        external_force.torque = 0.0;
+    }
+
+    for enemy_entity in &enemy_query {
+        commands.entity(enemy_entity).try_despawn();
+    }
+    for projectile_entity in &enemy_projectile_query {
+        commands.entity(projectile_entity).try_despawn();
+    }
+
+    bootstrap.seeded = false;
+    boss_state.active_segment_index = next_segment_bounds.index;
+    boss_state.active_segment_id = next_segment_bounds.id.to_string();
+    boss_state.active_segment_start_x = next_segment_bounds.start_x;
+    boss_state.active_segment_end_x = next_segment_bounds.end_x;
+    boss_state.boss_trigger_x = (next_segment_bounds.end_x - SEGMENT_BOSS_TRIGGER_BEFORE_END_M)
+        .max(next_segment_bounds.start_x);
+    boss_state.boss_spawned_for_segment = false;
+    boss_state.boss_alive = false;
+
+    info!(
+        "Boss defeated in segment `{}`; transitioning to segment `{}` at x={:.1}.",
+        previous_segment_id, boss_state.active_segment_id, target_x
+    );
+}
+
 fn despawn_far_enemies(
     mut commands: Commands,
     player_query: Query<&Transform, With<PlayerVehicle>>,
-    enemy_query: Query<(Entity, &Transform), With<Enemy>>,
+    enemy_query: Query<(Entity, &Transform, &EnemyTypeId), With<Enemy>>,
 ) {
     let Ok(player_transform) = player_query.single() else {
         return;
@@ -1098,7 +1379,10 @@ fn despawn_far_enemies(
     let min_x = player_transform.translation.x - ENEMY_DESPAWN_BEHIND_M;
     let max_x = player_transform.translation.x + ENEMY_DESPAWN_AHEAD_M;
 
-    for (entity, transform) in &enemy_query {
+    for (entity, transform, enemy_type_id) in &enemy_query {
+        if enemy_type_id.0 == SEGMENT_BOSS_ENEMY_ID {
+            continue;
+        }
         if transform.translation.x < min_x || transform.translation.x > max_x {
             commands.entity(entity).try_despawn();
         }
@@ -1107,9 +1391,10 @@ fn despawn_far_enemies(
 
 fn rearm_bootstrap_when_empty(
     mut bootstrap: ResMut<EnemyBootstrapState>,
+    boss_state: Res<SegmentBossEncounterState>,
     enemy_query: Query<Entity, With<Enemy>>,
 ) {
-    if bootstrap.seeded && enemy_query.is_empty() {
+    if bootstrap.seeded && enemy_query.is_empty() && !boss_state.boss_alive {
         bootstrap.seeded = false;
     }
 }
@@ -1120,6 +1405,7 @@ fn shot_pattern_for_behavior(kind: EnemyBehaviorKind) -> ([f32; 3], usize) {
             ([0.0, 0.0, 0.0], 1)
         }
         EnemyBehaviorKind::Flier => ([ENEMY_FLIER_ARC_ANGLE_RAD, 0.0, 0.0], 1),
+        EnemyBehaviorKind::Boss => ([-0.14, 0.0, 0.14], 3),
         EnemyBehaviorKind::Charger => (
             [
                 -ENEMY_CHARGER_SPREAD_HALF_ANGLE_RAD,
@@ -1340,6 +1626,7 @@ fn body_size_for_behavior(kind: EnemyBehaviorKind, hitbox_radius: f32) -> Vec2 {
         EnemyBehaviorKind::Turret => Vec2::new(r * 2.5, r * 2.2),
         EnemyBehaviorKind::Charger => Vec2::new(r * 2.7, r * 1.9),
         EnemyBehaviorKind::Bomber => Vec2::new(r * 3.1, r * 1.6),
+        EnemyBehaviorKind::Boss => Vec2::new(r * 2.1, r * 1.7),
     }
 }
 
@@ -1350,6 +1637,7 @@ fn color_for_behavior(kind: EnemyBehaviorKind) -> Color {
         EnemyBehaviorKind::Turret => Color::srgb(0.81, 0.54, 0.84),
         EnemyBehaviorKind::Charger => Color::srgb(0.90, 0.41, 0.41),
         EnemyBehaviorKind::Bomber => Color::srgb(0.73, 0.78, 0.85),
+        EnemyBehaviorKind::Boss => Color::srgb(0.80, 0.90, 0.34),
     }
 }
 
@@ -1363,6 +1651,7 @@ fn behavior_kind_from_config(raw: &str) -> EnemyBehaviorKind {
         "turret" => EnemyBehaviorKind::Turret,
         "charger" => EnemyBehaviorKind::Charger,
         "bomber" => EnemyBehaviorKind::Bomber,
+        "boss" => EnemyBehaviorKind::Boss,
         _ => EnemyBehaviorKind::Walker,
     }
 }
@@ -1380,6 +1669,7 @@ fn resolve_enemy_model_entry<'a>(
     let behavior_id = match behavior_kind {
         EnemyBehaviorKind::Turret => Some("enemy_turret_model"),
         EnemyBehaviorKind::Bomber => Some("enemy_bomber_model"),
+        EnemyBehaviorKind::Boss => Some("enemy_drone_flier"),
         _ => None,
     }?;
     registry

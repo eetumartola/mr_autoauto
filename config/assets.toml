@@ -58,6 +58,12 @@ scene_path = "models/enemies/bullfinch.glb#Scene0"
 root_node = "ROOT"
 wheel_nodes = ["ROOT"]
 
+[[models]]
+id = "enemy_segment_boss_drone"
+scene_path = "models/enemies/bullfinch.glb#Scene0"
+root_node = "ROOT"
+wheel_nodes = ["ROOT"]
+
 [[splats]]
 id = "museum_hall_01"
 path = "splats/museum_hall_01.gcloud"

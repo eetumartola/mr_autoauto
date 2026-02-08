@@ -589,7 +589,7 @@ fn results_controls(
     mut exit: MessageWriter<AppExit>,
 ) {
     if keyboard.just_pressed(KeyCode::Space) {
-        next_state.set(GameState::Boot);
+        next_state.set(GameState::Loading);
     }
 
     if keyboard.just_pressed(KeyCode::KeyQ) {

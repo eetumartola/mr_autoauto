@@ -46,15 +46,13 @@ pub(super) fn spawn_vehicle_scene(
             .and_then(|registry| {
                 resolve_vehicle_model_entry(registry, &config.game.app.default_vehicle)
             })
-            .and_then(|(model_id, model_entry)| {
+            .and_then(|(_model_id, model_entry)| {
                 model_entry
                     .handle
                     .as_ref()
                     .map(|handle| PlayerVehicleModelSceneSpawn {
                         handle: handle.clone(),
                         scene_metadata: PlayerVehicleModelScene {
-                            model_id: model_id.to_string(),
-                            scene_path: model_entry.scene_path.clone(),
                             expected_root_node: model_entry.hierarchy.root_node.clone(),
                             expected_wheel_nodes: model_entry.hierarchy.wheel_nodes.clone(),
                             expected_turret_node: model_entry.hierarchy.turret_node.clone(),
@@ -297,22 +295,21 @@ pub(super) fn spawn_vehicle_scene(
                 Transform::default(),
             ));
 
-            for segment in ground_profile.segments.iter().copied() {
-                parent.spawn((
-                    Name::new("GroundSplineColliderSegment"),
-                    GroundSplineSegment {
-                        x0: segment.x0,
-                        x1: segment.x1,
-                    },
-                    GroundPhysicsCollider,
-                    RigidBody::Fixed,
-                    Collider::segment(segment.top0, segment.top1),
-                    Friction::coefficient(1.35),
-                    Restitution::coefficient(0.0),
-                    Transform::default(),
-                    GlobalTransform::default(),
-                ));
-            }
+            let collider_polyline = ground_profile
+                .points
+                .iter()
+                .map(|point| point.top)
+                .collect::<Vec<_>>();
+            parent.spawn((
+                Name::new("GroundSplineColliderPolyline"),
+                GroundPhysicsCollider,
+                RigidBody::Fixed,
+                Collider::polyline(collider_polyline, None),
+                Friction::coefficient(1.35),
+                Restitution::coefficient(0.0),
+                Transform::default(),
+                GlobalTransform::default(),
+            ));
         });
     }
 
