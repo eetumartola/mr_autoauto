@@ -546,8 +546,8 @@ pub(super) fn camera_follow_vehicle(
     camera_transform.translation.y = CAMERA_Y;
     camera_transform.translation.z = CAMERA_Z;
 
-    let speed_fraction = (telemetry.speed_mps.abs() / vehicle.max_forward_speed.max(1.0))
-        .clamp(0.0, 1.0);
+    let speed_fraction =
+        (telemetry.speed_mps.abs() / vehicle.max_forward_speed.max(1.0)).clamp(0.0, 1.0);
     let target_zoom_scale = CAMERA_ZOOM_MIN_SCALE_METERS
         + ((CAMERA_ZOOM_MAX_SCALE_METERS - CAMERA_ZOOM_MIN_SCALE_METERS) * speed_fraction);
     if let Projection::Orthographic(ortho) = &mut *camera_projection {
@@ -569,7 +569,8 @@ pub(super) fn sync_vehicle_model_camera_with_gameplay_camera(
     let Ok((gameplay_transform, gameplay_projection)) = gameplay_camera_query.single() else {
         return;
     };
-    let Ok((mut model_camera_transform, mut model_camera_projection)) = model_camera_query.single_mut()
+    let Ok((mut model_camera_transform, mut model_camera_projection)) =
+        model_camera_query.single_mut()
     else {
         return;
     };
@@ -617,23 +618,55 @@ pub(super) fn update_splat_background_parallax(
 
 #[cfg(feature = "gaussian_splats")]
 pub(super) fn sync_splat_background_runtime_from_config(
+    mut commands: Commands,
     config: Res<GameConfig>,
+    telemetry: Res<VehicleTelemetry>,
+    asset_server: Res<AssetServer>,
     mut camera_query: Query<&mut SplatBackgroundCamera>,
-    mut cloud_query: Query<&mut Transform, With<SplatBackgroundCloud>>,
+    mut cloud_query: Query<
+        (Entity, &mut PlanarGaussian3dHandle, &mut Transform),
+        With<SplatBackgroundCloud>,
+    >,
 ) {
-    let Some(first_segment) = config.segments.segment_sequence.first() else {
+    let Some(active_segment_id) = resolve_active_segment_id(config.as_ref(), telemetry.distance_m)
+    else {
         return;
     };
-    let Some(background_cfg) = config.backgrounds_by_id.get(&first_segment.id) else {
+    let Some(background_cfg) = config.backgrounds_by_id.get(active_segment_id) else {
         return;
     };
+
+    let active_splat_handle = background_cfg
+        .splat_asset_id
+        .as_deref()
+        .and_then(|splat_asset_id| config.splat_assets_by_id.get(splat_asset_id))
+        .map(|splat_asset_cfg| {
+            (
+                splat_asset_cfg.id.clone(),
+                splat_asset_cfg.path.clone(),
+                asset_server.load::<PlanarGaussian3d>(splat_asset_cfg.path.clone()),
+            )
+        });
 
     for mut camera in &mut camera_query {
         camera.parallax = background_cfg.parallax;
         camera.loop_length_m = background_cfg.loop_length_m.max(0.0);
     }
 
-    for mut transform in &mut cloud_query {
+    for (cloud_entity, mut cloud_handle, mut transform) in &mut cloud_query {
+        if let Some((active_splat_id, active_splat_path, active_handle)) = &active_splat_handle {
+            if cloud_handle.0.id() != active_handle.id() {
+                cloud_handle.0 = active_handle.clone();
+                commands
+                    .entity(cloud_entity)
+                    .remove::<SplatBackgroundSorted>();
+                info!(
+                    "Switched active splat background to `{}` from `{}` for segment `{}`.",
+                    active_splat_id, active_splat_path, active_segment_id
+                );
+            }
+        }
+
         transform.translation = Vec3::new(
             background_cfg.offset_x_m,
             SPLAT_BACKGROUND_Y_OFFSET_M + background_cfg.offset_y_m,
@@ -763,6 +796,11 @@ pub(super) fn spawn_gaussian_splat_background(
         splat_asset_id, splat_asset_cfg.path, parallax
     );
     true
+}
+
+#[cfg(feature = "gaussian_splats")]
+fn resolve_active_segment_id(config: &GameConfig, distance_m: f32) -> Option<&str> {
+    config.active_segment_id_for_distance(distance_m)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -663,11 +663,11 @@ fn update_enemy_behaviors(
                 let cruise_wave_amplitude = (behavior.hover_amplitude_m
                     * ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_FACTOR)
                     .clamp(0.5, ENEMY_BOMBER_CRUISE_WAVE_AMPLITUDE_MAX_M);
-                let cruise_wave = ((behavior.elapsed_s * ENEMY_BOMBER_CRUISE_WAVE_FREQUENCY_HZ
-                    * TAU)
-                    + behavior.phase_offset_rad)
-                    .sin()
-                    * cruise_wave_amplitude;
+                let cruise_wave =
+                    ((behavior.elapsed_s * ENEMY_BOMBER_CRUISE_WAVE_FREQUENCY_HZ * TAU)
+                        + behavior.phase_offset_rad)
+                        .sin()
+                        * cruise_wave_amplitude;
                 let target_y = behavior.base_altitude_m + cruise_wave;
                 desired_velocity.y = (target_y - enemy_position.y) * 4.0;
             }
@@ -1473,30 +1473,9 @@ fn aabb_corners(min: Vec3, max: Vec3) -> [Vec3; 8] {
 }
 
 fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
-    let terrain = &config.game.terrain;
-    terrain.base_height - terrain.ground_lowering_m
-        + (x * terrain.ramp_slope)
-        + (x * terrain.wave_a_frequency).sin() * terrain.wave_a_amplitude
-        + (x * terrain.wave_b_frequency).sin() * terrain.wave_b_amplitude
-        + (x * terrain.wave_c_frequency).sin() * terrain.wave_c_amplitude
+    config.terrain_height_at_x(x)
 }
 
 fn terrain_tangent_at_x(config: &GameConfig, x: f32) -> Vec2 {
-    let terrain = &config.game.terrain;
-    let slope = terrain.ramp_slope
-        + (x * terrain.wave_a_frequency).cos()
-            * terrain.wave_a_amplitude
-            * terrain.wave_a_frequency
-        + (x * terrain.wave_b_frequency).cos()
-            * terrain.wave_b_amplitude
-            * terrain.wave_b_frequency
-        + (x * terrain.wave_c_frequency).cos()
-            * terrain.wave_c_amplitude
-            * terrain.wave_c_frequency;
-    let tangent = Vec2::new(1.0, slope).normalize_or_zero();
-    if tangent.length_squared() <= f32::EPSILON {
-        Vec2::X
-    } else {
-        tangent
-    }
+    config.terrain_tangent_at_x(x)
 }

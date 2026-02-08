@@ -236,6 +236,12 @@ struct BackgroundTuningParams {
     scale_y: f32,
     scale_z: f32,
     loop_length_m: f32,
+    wave_a_amplitude: f32,
+    wave_a_frequency: f32,
+    wave_b_amplitude: f32,
+    wave_b_frequency: f32,
+    wave_c_amplitude: f32,
+    wave_c_frequency: f32,
     ground_lowering_m: f32,
 }
 
@@ -250,6 +256,24 @@ impl BackgroundTuningParams {
             scale_y: background.scale_y,
             scale_z: background.scale_z,
             loop_length_m: background.loop_length_m,
+            wave_a_amplitude: background
+                .wave_a_amplitude
+                .unwrap_or(terrain.wave_a_amplitude),
+            wave_a_frequency: background
+                .wave_a_frequency
+                .unwrap_or(terrain.wave_a_frequency),
+            wave_b_amplitude: background
+                .wave_b_amplitude
+                .unwrap_or(terrain.wave_b_amplitude),
+            wave_b_frequency: background
+                .wave_b_frequency
+                .unwrap_or(terrain.wave_b_frequency),
+            wave_c_amplitude: background
+                .wave_c_amplitude
+                .unwrap_or(terrain.wave_c_amplitude),
+            wave_c_frequency: background
+                .wave_c_frequency
+                .unwrap_or(terrain.wave_c_frequency),
             ground_lowering_m: terrain.ground_lowering_m,
         }
     }
@@ -263,6 +287,12 @@ impl BackgroundTuningParams {
         background.scale_y = self.scale_y;
         background.scale_z = self.scale_z;
         background.loop_length_m = self.loop_length_m;
+        background.wave_a_amplitude = Some(self.wave_a_amplitude);
+        background.wave_a_frequency = Some(self.wave_a_frequency);
+        background.wave_b_amplitude = Some(self.wave_b_amplitude);
+        background.wave_b_frequency = Some(self.wave_b_frequency);
+        background.wave_c_amplitude = Some(self.wave_c_amplitude);
+        background.wave_c_frequency = Some(self.wave_c_frequency);
     }
 
     fn apply_to_terrain(&self, terrain: &mut TerrainConfig) {
@@ -1099,6 +1129,48 @@ fn background_tuning_panel_ui(
             );
             params_changed |= tuning_slider_row(
                 ui,
+                "wave_a_amplitude",
+                &mut params.wave_a_amplitude,
+                -20.0..=20.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "wave_a_frequency",
+                &mut params.wave_a_frequency,
+                0.0..=2.0,
+                0.001,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "wave_b_amplitude",
+                &mut params.wave_b_amplitude,
+                -20.0..=20.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "wave_b_frequency",
+                &mut params.wave_b_frequency,
+                0.0..=2.0,
+                0.001,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "wave_c_amplitude",
+                &mut params.wave_c_amplitude,
+                -20.0..=20.0,
+                0.01,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
+                "wave_c_frequency",
+                &mut params.wave_c_frequency,
+                0.0..=2.0,
+                0.001,
+            );
+            params_changed |= tuning_slider_row(
+                ui,
                 "ground_lowering_m",
                 &mut params.ground_lowering_m,
                 0.0..=120.0,
@@ -1459,6 +1531,47 @@ fn apply_background_tuning_to_runtime_config(
     background_id: &str,
     params: &BackgroundTuningParams,
 ) -> Result<(), String> {
+    for (label, value) in [
+        ("parallax", params.parallax),
+        ("offset_x_m", params.offset_x_m),
+        ("offset_y_m", params.offset_y_m),
+        ("offset_z_m", params.offset_z_m),
+        ("scale_x", params.scale_x),
+        ("scale_y", params.scale_y),
+        ("scale_z", params.scale_z),
+        ("loop_length_m", params.loop_length_m),
+        ("wave_a_amplitude", params.wave_a_amplitude),
+        ("wave_a_frequency", params.wave_a_frequency),
+        ("wave_b_amplitude", params.wave_b_amplitude),
+        ("wave_b_frequency", params.wave_b_frequency),
+        ("wave_c_amplitude", params.wave_c_amplitude),
+        ("wave_c_frequency", params.wave_c_frequency),
+        ("ground_lowering_m", params.ground_lowering_m),
+    ] {
+        if !value.is_finite() {
+            return Err(format!(
+                "Background tuning panel: `{label}` must be a finite number."
+            ));
+        }
+    }
+    if params.scale_x.abs() <= f32::EPSILON
+        || params.scale_y.abs() <= f32::EPSILON
+        || params.scale_z.abs() <= f32::EPSILON
+    {
+        return Err("Background tuning panel: scale_x/scale_y/scale_z cannot be zero.".to_string());
+    }
+    for (label, value) in [
+        ("loop_length_m", params.loop_length_m),
+        ("wave_a_frequency", params.wave_a_frequency),
+        ("wave_b_frequency", params.wave_b_frequency),
+        ("wave_c_frequency", params.wave_c_frequency),
+        ("ground_lowering_m", params.ground_lowering_m),
+    ] {
+        if value < 0.0 {
+            return Err(format!("Background tuning panel: `{label}` must be >= 0."));
+        }
+    }
+
     params.apply_to_terrain(&mut config.game.terrain);
 
     let Some(background) = config.backgrounds_by_id.get_mut(background_id) else {
@@ -1780,6 +1893,36 @@ fn write_background_params_to_toml_value(
     set_toml_float(background_table, "scale_y", params.scale_y)?;
     set_toml_float(background_table, "scale_z", params.scale_z)?;
     set_toml_float(background_table, "loop_length_m", params.loop_length_m)?;
+    set_toml_float(
+        background_table,
+        "wave_a_amplitude",
+        params.wave_a_amplitude,
+    )?;
+    set_toml_float(
+        background_table,
+        "wave_a_frequency",
+        params.wave_a_frequency,
+    )?;
+    set_toml_float(
+        background_table,
+        "wave_b_amplitude",
+        params.wave_b_amplitude,
+    )?;
+    set_toml_float(
+        background_table,
+        "wave_b_frequency",
+        params.wave_b_frequency,
+    )?;
+    set_toml_float(
+        background_table,
+        "wave_c_amplitude",
+        params.wave_c_amplitude,
+    )?;
+    set_toml_float(
+        background_table,
+        "wave_c_frequency",
+        params.wave_c_frequency,
+    )?;
 
     Ok(())
 }

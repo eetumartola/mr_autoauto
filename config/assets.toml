@@ -70,6 +70,10 @@ path = "splats/garage_alley_01.gcloud"
 id = "mystical"
 path = "splats/mystical.ply"
 
+[[splats]]
+id = "castle"
+path = "splats/castle.ply"
+
 [[audio]]
 id = "sfx_player_shot"
 path = "audio/sfx/player_shot.ogg"

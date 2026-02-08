@@ -212,6 +212,27 @@ impl GameConfig {
                     "backgrounds.toml::backgrounds[{index}].loop_length_m must be >= 0"
                 )));
             }
+            for (label, value, requires_non_negative) in [
+                ("wave_a_amplitude", background.wave_a_amplitude, false),
+                ("wave_a_frequency", background.wave_a_frequency, true),
+                ("wave_b_amplitude", background.wave_b_amplitude, false),
+                ("wave_b_frequency", background.wave_b_frequency, true),
+                ("wave_c_amplitude", background.wave_c_amplitude, false),
+                ("wave_c_frequency", background.wave_c_frequency, true),
+            ] {
+                if let Some(value) = value {
+                    if !value.is_finite() {
+                        return Err(ConfigError::Validation(format!(
+                            "backgrounds.toml::backgrounds[{index}].{label} must be finite when provided"
+                        )));
+                    }
+                    if requires_non_negative && value < 0.0 {
+                        return Err(ConfigError::Validation(format!(
+                            "backgrounds.toml::backgrounds[{index}].{label} must be >= 0 when provided"
+                        )));
+                    }
+                }
+            }
             if let Some(splat_asset_id) = background.splat_asset_id.as_deref() {
                 if !self.splat_assets_by_id.contains_key(splat_asset_id) {
                     return Err(ConfigError::Validation(format!(
@@ -929,6 +950,131 @@ impl GameConfig {
 
         Ok(())
     }
+
+    pub fn active_segment_id_for_distance(&self, distance_m: f32) -> Option<&str> {
+        self.resolve_segment_at_distance(distance_m)
+            .map(|(_, segment, _, _)| segment.id.as_str())
+    }
+
+    pub fn terrain_height_at_x(&self, x: f32) -> f32 {
+        let terrain = &self.game.terrain;
+        let default_waves = TerrainWaveParams::from_terrain(terrain);
+        let default_base_height = terrain.base_height - terrain.ground_lowering_m;
+        let Some((_, segment, segment_start_x, segment_start_height)) =
+            self.resolve_segment_at_distance(x)
+        else {
+            return default_base_height + default_waves.height_delta(x, terrain.ramp_slope);
+        };
+
+        let waves = self.terrain_waves_for_segment_id(segment.id.as_str());
+        let local_x = x - segment_start_x;
+        segment_start_height + waves.height_delta(local_x, terrain.ramp_slope)
+    }
+
+    pub fn terrain_tangent_at_x(&self, x: f32) -> Vec2 {
+        let terrain = &self.game.terrain;
+        let (local_x, waves) = match self.resolve_segment_at_distance(x) {
+            Some((_, segment, segment_start_x, _)) => (
+                x - segment_start_x,
+                self.terrain_waves_for_segment_id(segment.id.as_str()),
+            ),
+            None => (x, TerrainWaveParams::from_terrain(terrain)),
+        };
+        let slope = waves.slope(local_x, terrain.ramp_slope);
+        let tangent = Vec2::new(1.0, slope).normalize_or_zero();
+        if tangent.length_squared() <= f32::EPSILON {
+            Vec2::X
+        } else {
+            tangent
+        }
+    }
+
+    fn resolve_segment_at_distance(
+        &self,
+        distance_m: f32,
+    ) -> Option<(usize, &SegmentSequenceConfig, f32, f32)> {
+        let mut segment_start_x = 0.0_f32;
+        let mut segment_start_height =
+            self.game.terrain.base_height - self.game.terrain.ground_lowering_m;
+        let mut active = None;
+
+        for (index, segment) in self.segments.segment_sequence.iter().enumerate() {
+            let length = segment.length.max(0.0);
+            let waves = self.terrain_waves_for_segment_id(segment.id.as_str());
+            active = Some((index, segment, segment_start_x, segment_start_height));
+
+            segment_start_x += length;
+            if distance_m <= segment_start_x {
+                break;
+            }
+
+            segment_start_height += waves.height_delta(length, self.game.terrain.ramp_slope);
+        }
+
+        active
+    }
+
+    fn terrain_waves_for_segment_id(&self, segment_id: &str) -> TerrainWaveParams {
+        let mut waves = TerrainWaveParams::from_terrain(&self.game.terrain);
+        if let Some(background) = self.backgrounds_by_id.get(segment_id) {
+            if let Some(value) = background.wave_a_amplitude {
+                waves.wave_a_amplitude = value;
+            }
+            if let Some(value) = background.wave_a_frequency {
+                waves.wave_a_frequency = value;
+            }
+            if let Some(value) = background.wave_b_amplitude {
+                waves.wave_b_amplitude = value;
+            }
+            if let Some(value) = background.wave_b_frequency {
+                waves.wave_b_frequency = value;
+            }
+            if let Some(value) = background.wave_c_amplitude {
+                waves.wave_c_amplitude = value;
+            }
+            if let Some(value) = background.wave_c_frequency {
+                waves.wave_c_frequency = value;
+            }
+        }
+        waves
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TerrainWaveParams {
+    wave_a_amplitude: f32,
+    wave_a_frequency: f32,
+    wave_b_amplitude: f32,
+    wave_b_frequency: f32,
+    wave_c_amplitude: f32,
+    wave_c_frequency: f32,
+}
+
+impl TerrainWaveParams {
+    fn from_terrain(terrain: &TerrainConfig) -> Self {
+        Self {
+            wave_a_amplitude: terrain.wave_a_amplitude,
+            wave_a_frequency: terrain.wave_a_frequency,
+            wave_b_amplitude: terrain.wave_b_amplitude,
+            wave_b_frequency: terrain.wave_b_frequency,
+            wave_c_amplitude: terrain.wave_c_amplitude,
+            wave_c_frequency: terrain.wave_c_frequency,
+        }
+    }
+
+    fn height_delta(self, x: f32, ramp_slope: f32) -> f32 {
+        (x * ramp_slope)
+            + (x * self.wave_a_frequency).sin() * self.wave_a_amplitude
+            + (x * self.wave_b_frequency).sin() * self.wave_b_amplitude
+            + (x * self.wave_c_frequency).sin() * self.wave_c_amplitude
+    }
+
+    fn slope(self, x: f32, ramp_slope: f32) -> f32 {
+        ramp_slope
+            + (x * self.wave_a_frequency).cos() * self.wave_a_amplitude * self.wave_a_frequency
+            + (x * self.wave_b_frequency).cos() * self.wave_b_amplitude * self.wave_b_frequency
+            + (x * self.wave_c_frequency).cos() * self.wave_c_amplitude * self.wave_c_frequency
+    }
 }
 
 #[derive(Debug)]
@@ -1581,6 +1727,18 @@ pub struct BackgroundConfig {
     pub scale_z: f32,
     #[serde(default = "default_background_loop_length_m")]
     pub loop_length_m: f32,
+    #[serde(default)]
+    pub wave_a_amplitude: Option<f32>,
+    #[serde(default)]
+    pub wave_a_frequency: Option<f32>,
+    #[serde(default)]
+    pub wave_b_amplitude: Option<f32>,
+    #[serde(default)]
+    pub wave_b_frequency: Option<f32>,
+    #[serde(default)]
+    pub wave_c_amplitude: Option<f32>,
+    #[serde(default)]
+    pub wave_c_frequency: Option<f32>,
 }
 
 fn default_background_offset_x_m() -> f32 {
@@ -2174,6 +2332,12 @@ mod tests {
                     scale_y: 1.0,
                     scale_z: 1.0,
                     loop_length_m: 0.0,
+                    wave_a_amplitude: None,
+                    wave_a_frequency: None,
+                    wave_b_amplitude: None,
+                    wave_b_frequency: None,
+                    wave_c_amplitude: None,
+                    wave_c_frequency: None,
                 }],
             },
             environments: EnvironmentsFile {
@@ -2374,6 +2538,12 @@ mod tests {
                     scale_y: 1.0,
                     scale_z: 1.0,
                     loop_length_m: 0.0,
+                    wave_a_amplitude: None,
+                    wave_a_frequency: None,
+                    wave_b_amplitude: None,
+                    wave_b_frequency: None,
+                    wave_c_amplitude: None,
+                    wave_c_frequency: None,
                 },
             )]),
             environments_by_id: HashMap::from([(

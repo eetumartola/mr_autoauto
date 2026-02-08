@@ -793,7 +793,11 @@ fn spawn_radial_burst_particles(
                 initial_alpha: alpha,
             },
             Sprite::from_color(Color::srgba(red, green, blue, alpha), Vec2::splat(size)),
-            Transform::from_xyz(world_position.x, world_position.y, FEEDBACK_PARTICLE_Z_M + 0.03),
+            Transform::from_xyz(
+                world_position.x,
+                world_position.y,
+                FEEDBACK_PARTICLE_Z_M + 0.03,
+            ),
         ));
     }
 }

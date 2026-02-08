@@ -4,7 +4,7 @@ color = [
     0.19,
     0.24,
 ]
-id = "museum_hall_01"
+id = "mythical"
 loop_length_m = 0.0
 offset_x_m = 250.0
 offset_y_m = -30.0
@@ -15,6 +15,12 @@ scale_x = 6.5
 scale_y = -9.0
 scale_z = -11.0
 splat_asset_id = "mystical"
+wave_a_amplitude = 1.7
+wave_a_frequency = 0.14
+wave_b_amplitude = 1.2
+wave_b_frequency = 0.46
+wave_c_amplitude = 2.8
+wave_c_frequency = 0.032
 
 [[backgrounds]]
 color = [
@@ -22,13 +28,20 @@ color = [
     0.14,
     0.16,
 ]
-id = "garage_alley_01"
+id = "castle"
 loop_length_m = 0.0
-offset_x_m = 0.0
-offset_y_m = 0.0
-offset_z_m = 0.0
-parallax = 0.45
-placeholder = "polygon"
-scale_x = 1.0
-scale_y = 1.0
-scale_z = 1.0
+offset_x_m = 400.0
+offset_y_m = 20.0
+offset_z_m = 170.0
+parallax = 0.5
+placeholder = "box"
+scale_x = 17.0
+scale_y = -18.0
+scale_z = -13.0
+splat_asset_id = "castle"
+wave_a_amplitude = 2.1
+wave_a_frequency = 0.18
+wave_b_amplitude = 0.9
+wave_b_frequency = 0.558
+wave_c_amplitude = 3.4
+wave_c_frequency = 0.045

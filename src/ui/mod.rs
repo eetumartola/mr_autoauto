@@ -342,25 +342,8 @@ fn build_upgrade_summary(upgrades_by_id: &HashMap<String, HudUpgradeEntry>) -> S
 }
 
 fn resolve_active_segment_id(distance_m: f32, config: &GameConfig) -> String {
-    if config.segments.segment_sequence.is_empty() {
-        return "n/a".to_string();
-    }
-
-    let mut cursor = 0.0_f32;
-    let mut active_segment = config
-        .segments
-        .segment_sequence
-        .first()
-        .map(|segment| segment.id.clone())
-        .unwrap_or_else(|| "n/a".to_string());
-
-    for segment in &config.segments.segment_sequence {
-        cursor += segment.length.max(0.0);
-        active_segment = segment.id.clone();
-        if distance_m <= cursor {
-            break;
-        }
-    }
-
-    active_segment
+    config
+        .active_segment_id_for_distance(distance_m)
+        .unwrap_or("n/a")
+        .to_string()
 }

@@ -309,8 +309,11 @@ environment = "ice"
 
 **Tasks**
 - [in progress] E1. Define `SegmentConfig` (asset ref, length, env id, spawn sets, music cue).
-  - first splat asset hook is active via `backgrounds.toml::splat_asset_id` + `assets.toml::splats` for `museum_hall_01`.
+  - first splat asset hook is active via `backgrounds.toml::splat_asset_id` + `assets.toml::splats`.
   - [done] Added background placement tuning workflow (`B` debug panel): live `parallax`, `offset_x/y/z`, `scale_x/y/z`, `loop_length_m`, `ground_lowering_m` edits + apply persists to `backgrounds.toml` and `game.toml`.
+  - [done] Segment naming pass: active segment IDs are now `castle` and `mythical` (with `castle` first).
+  - [done] Runtime splat background sync now follows the currently active segment by run distance and swaps splat assets when segment changes.
+  - [done] Terrain wave settings (`wave_a/b/c` amplitude/frequency) are now segment-specific via `backgrounds.toml`; all terrain sampling systems resolve values from the active segment.
 - [not started] E2. Segment placement:
   - concatenate along +x; maintain a "segment cursor" at current distance.
 - [not started] E3. Streaming:
@@ -453,7 +456,7 @@ environment = "ice"
   - `V` vehicle tuning panel edits runtime values immediately.
   - `Apply` persists vehicle tuning back to `config/vehicles.toml`.
 - Background tuning workflow:
-  - `B` background tuning panel edits parallax/offset/scale/loop length and terrain `ground_lowering_m` live.
+  - `B` background tuning panel edits parallax/offset/scale/loop length plus per-segment terrain wave amplitude/frequency and terrain `ground_lowering_m` live.
   - `Apply` persists background values to `config/backgrounds.toml` and terrain lowering to `config/game.toml`.
 - Units policy: gameplay, physics, HUD, and config use meters directly (no separate world-unit conversion layer).
 - Physics direction: `bevy_rapier2d` is the runtime backend for player/enemy dynamics.
@@ -512,6 +515,7 @@ environment = "ice"
   - hooked `beetle_rough.glb` for walker, `beetle_green.glb` for charger, and `bullfinch.glb` for flier via enemy-specific model IDs.
 - Terrain/sample consistency note:
   - all gameplay systems that sample terrain height (vehicle, combat/projectile impacts, enemies, pickups) now apply `game.toml::terrain.ground_lowering_m` consistently.
+  - terrain wave sampling now resolves per active segment (`backgrounds.toml` overrides with fallback to `game.toml::terrain`) for vehicle, enemies, combat impacts, pickups, and terrain mesh generation.
 - Ground-follow behavior note:
   - walker/charger follow terrain tangent and use tuned uphill movement to handle slopes reliably.
   - bomber uses a long-period sine-wave cruise path.
