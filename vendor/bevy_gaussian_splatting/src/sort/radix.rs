@@ -47,6 +47,15 @@ const RADIX_SHADER_HANDLE: Handle<Shader> = uuid_handle!("dedb3ddf-f254-4361-876
 const TEMPORAL_SORT_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("11986b71-25d8-410b-adfa-6afb107ae4de");
 
+// Mirror of wgpu's DrawIndirectArgs layout.
+#[repr(C)]
+struct DrawIndirectArgsLayout {
+    _vertex_count: u32,
+    _instance_count: u32,
+    _first_vertex: u32,
+    _first_instance: u32,
+}
+
 #[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
 pub struct RadixSortLabel;
 
@@ -231,7 +240,7 @@ impl<R: PlanarSync> FromWorld for RadixSortPipeline<R> {
                 ty: BufferBindingType::Storage { read_only: false },
                 has_dynamic_offset: false,
                 min_binding_size: BufferSize::new(
-                    std::mem::size_of::<wgpu::util::DrawIndirectArgs>() as u64,
+                    std::mem::size_of::<DrawIndirectArgsLayout>() as u64,
                 ),
             },
             count: None,

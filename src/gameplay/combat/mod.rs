@@ -4,6 +4,7 @@ use crate::gameplay::enemies::{
 };
 use crate::gameplay::vehicle::PlayerVehicle;
 use crate::states::GameState;
+use crate::web::max_player_projectiles_for_platform;
 use bevy::prelude::*;
 use std::collections::HashSet;
 use std::f32::consts::{PI, TAU};
@@ -351,6 +352,7 @@ fn fire_turret_projectiles(
     config: Res<GameConfig>,
     targeting: Res<TurretTargetingState>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
+    projectile_query: Query<(), With<PlayerProjectile>>,
     mut fire_state: ResMut<TurretFireState>,
     mut fired_events: MessageWriter<PlayerWeaponFiredEvent>,
 ) {
@@ -394,11 +396,18 @@ fn fire_turret_projectiles(
 
     let spread_half_angle_rad = primary_weapon.spread_degrees.to_radians() * 0.5;
     let mut shots_spawned = 0_u32;
+    let max_projectiles = max_player_projectiles_for_platform(&config);
+    let mut live_projectile_count = projectile_query.iter().count();
 
     while fire_state.burst_shots_remaining > 0
         && now >= fire_state.next_burst_shot_time_s
         && shots_spawned < MAX_BURST_SHOTS_PER_FRAME
     {
+        if live_projectile_count >= max_projectiles {
+            fire_state.burst_shots_remaining = 0;
+            break;
+        }
+
         let spread_angle_rad =
             next_signed_unit_random(&mut fire_state.rng_state) * spread_half_angle_rad;
         let shot_direction_local =
@@ -418,6 +427,7 @@ fn fire_turret_projectiles(
             targeting.target_entity,
         );
 
+        live_projectile_count = live_projectile_count.saturating_add(1);
         fire_state.burst_shots_remaining -= 1;
         fire_state.next_burst_shot_time_s += burst_interval_s;
         shots_spawned += 1;
@@ -425,6 +435,9 @@ fn fire_turret_projectiles(
 
     if let Some(secondary_weapon_id) = vehicle_config.secondary_weapon_id.as_deref() {
         if now >= fire_state.next_missile_fire_time_s {
+            if live_projectile_count >= max_projectiles {
+                return;
+            }
             if let Some(secondary_weapon) = config.weapons_by_id.get(secondary_weapon_id) {
                 let missile_direction_local =
                     Vec2::from_angle(targeting.cone_half_angle_rad).normalize_or_zero();

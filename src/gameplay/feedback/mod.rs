@@ -9,6 +9,7 @@ use crate::gameplay::enemies::{
 use crate::gameplay::pickups::{PickupCollectedEvent, PickupKind};
 use crate::gameplay::vehicle::{PlayerVehicle, VehicleLandingEvent};
 use crate::states::GameState;
+use crate::{config::GameConfig, web::should_reduce_fx_for_platform};
 use bevy::prelude::*;
 use std::f32::consts::TAU;
 
@@ -234,6 +235,7 @@ fn cleanup_feedback_entities(
 #[allow(clippy::too_many_arguments)]
 fn collect_feedback_events(
     mut commands: Commands,
+    config: Option<Res<GameConfig>>,
     mut damage_events: MessageReader<PlayerDamageEvent>,
     mut crash_events: MessageReader<PlayerEnemyCrashEvent>,
     mut landing_events: MessageReader<VehicleLandingEvent>,
@@ -245,6 +247,10 @@ fn collect_feedback_events(
     mut indicators: ResMut<DamageIndicatorState>,
     mut shake: ResMut<CameraShakeState>,
 ) {
+    let reduce_particles = config
+        .as_ref()
+        .map(|config| should_reduce_fx_for_platform(config))
+        .unwrap_or(false);
     let player_position = player_query
         .single()
         .ok()
@@ -262,12 +268,14 @@ fn collect_feedback_events(
         shake.trauma = (shake.trauma + trauma_bump).clamp(0.0, 1.0);
 
         if let Some(source_position) = event.source_world_position {
-            spawn_player_hit_particles(
-                &mut commands,
-                source_position,
-                event.source,
-                &mut shake.rng_state,
-            );
+            if !reduce_particles {
+                spawn_player_hit_particles(
+                    &mut commands,
+                    source_position,
+                    event.source,
+                    &mut shake.rng_state,
+                );
+            }
         }
     }
 
@@ -277,12 +285,14 @@ fn collect_feedback_events(
     }
 
     for event in landing_events.read() {
-        spawn_landing_dust_particles(
-            &mut commands,
-            event.world_position,
-            event.impact_speed_mps,
-            &mut shake.rng_state,
-        );
+        if !reduce_particles {
+            spawn_landing_dust_particles(
+                &mut commands,
+                event.world_position,
+                event.impact_speed_mps,
+                &mut shake.rng_state,
+            );
+        }
         let landing_trauma = if event.was_crash {
             (event.impact_speed_mps * 0.015).clamp(0.08, 0.30)
         } else {
@@ -292,20 +302,26 @@ fn collect_feedback_events(
     }
 
     for event in pickup_events.read() {
-        spawn_pickup_sparkle_particles(
-            &mut commands,
-            event.world_position,
-            event.kind,
-            &mut shake.rng_state,
-        );
+        if !reduce_particles {
+            spawn_pickup_sparkle_particles(
+                &mut commands,
+                event.world_position,
+                event.kind,
+                &mut shake.rng_state,
+            );
+        }
     }
 
     for event in player_projectile_impact_events.read() {
-        spawn_player_projectile_impact_particles(&mut commands, *event, &mut shake.rng_state);
+        if !reduce_particles {
+            spawn_player_projectile_impact_particles(&mut commands, *event, &mut shake.rng_state);
+        }
     }
 
     for event in enemy_projectile_impact_events.read() {
-        spawn_enemy_projectile_impact_particles(&mut commands, *event, &mut shake.rng_state);
+        if !reduce_particles {
+            spawn_enemy_projectile_impact_particles(&mut commands, *event, &mut shake.rng_state);
+        }
         if event.kind == EnemyProjectileImpactKind::Bomb {
             let trauma_bump = match event.target {
                 EnemyProjectileImpactTarget::Ground => 0.14,
@@ -316,7 +332,9 @@ fn collect_feedback_events(
     }
 
     for event in enemy_killed_events.read() {
-        spawn_enemy_death_particles(&mut commands, event.world_position, &mut shake.rng_state);
+        if !reduce_particles {
+            spawn_enemy_death_particles(&mut commands, event.world_position, &mut shake.rng_state);
+        }
         shake.trauma = (shake.trauma + 0.07).clamp(0.0, 1.0);
     }
 }

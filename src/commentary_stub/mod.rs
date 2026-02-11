@@ -8,15 +8,28 @@ use crate::gameplay::vehicle::{
     PlayerHealth, PlayerVehicle, VehicleStuntEvent, VehicleStuntMetrics, VehicleTelemetry,
 };
 use crate::states::GameState;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::web::{audio_playback_allowed, AudioUnlockState};
+#[cfg(target_arch = "wasm32")]
+use crate::web::AudioUnlockState;
+#[cfg(not(target_arch = "wasm32"))]
 use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
-use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread::JoinHandle;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Duration;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const API_BASE_URL_ENV: &str = "NEOCORTEX_API_BASE_URL";
 const API_KEY_ENV: &str = "NEOCORTEX_API_KEY";
@@ -157,7 +170,10 @@ struct InFlightApiRequest {
     subtitle_color: [f32; 3],
     fallback_line: String,
     started_at_seconds: f64,
+    #[cfg(not(target_arch = "wasm32"))]
     handle: JoinHandle<Result<NeocortexJobResult, String>>,
+    #[cfg(target_arch = "wasm32")]
+    _web_no_worker: (),
 }
 
 #[derive(Debug)]
@@ -564,6 +580,7 @@ fn collect_commentary_events(
         }
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
 fn poll_neocortex_api_result(
     time: Res<Time>,
     config: Res<GameConfig>,
@@ -660,13 +677,27 @@ fn poll_neocortex_api_result(
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn poll_neocortex_api_result(
+    _time: Res<Time>,
+    _config: Res<GameConfig>,
+    _state: ResMut<CommentaryStubState>,
+) {
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn play_pending_commentary_audio(
     config: Res<GameConfig>,
+    audio_unlock: Option<Res<AudioUnlockState>>,
     mut commands: Commands,
     mut state: ResMut<CommentaryStubState>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
     existing_playback_query: Query<Entity, With<CommentaryNarrationPlayback>>,
 ) {
+    if !audio_playback_allowed(&config, audio_unlock.as_deref()) {
+        return;
+    }
+
     let Some(audio_path) = state.pending_audio_path.take() else {
         return;
     };
@@ -720,6 +751,15 @@ fn play_pending_commentary_audio(
         AudioPlayer::new(handle),
         PlaybackSettings::DESPAWN.with_volume(Volume::Linear(volume)),
     ));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn play_pending_commentary_audio(
+    _config: Res<GameConfig>,
+    _audio_unlock: Option<Res<AudioUnlockState>>,
+    mut state: ResMut<CommentaryStubState>,
+) {
+    state.pending_audio_path = None;
 }
 
 fn prepare_narration_audio_bytes(mut bytes: Vec<u8>) -> Result<Vec<u8>, String> {
@@ -908,27 +948,20 @@ fn process_commentary_queue(
         return;
     }
 
-    let Some(api_key) = std::env::var(API_KEY_ENV)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-    else {
-        state.api_status = format!("{API_KEY_ENV} not set, using fallback");
-        state.last_audio_path.clear();
-        state.pending_audio_path = None;
-        finalize_commentary_line(
-            &mut state,
-            &profile.id,
-            &speaker_name,
-            profile.subtitle_color,
-            fallback_line,
-            now,
-        );
-        return;
-    };
-
-    let character_id = profile.character_id.trim().to_string();
-    if character_id.is_empty() {
-        state.api_status = "character_id missing, using fallback".to_string();
+    #[cfg(target_arch = "wasm32")]
+    {
+        let proxy_base = config.game.web.neocortex_proxy_base_url.trim();
+        if proxy_base.is_empty() {
+            state.api_status = "web mode: API fallback active (set game.web.neocortex_proxy_base_url to use a CORS proxy)".to_string();
+        } else if config.game.web.allow_client_api_key {
+            state.api_status = format!(
+                "web mode: proxy `{proxy_base}` configured; client API key injection is disabled in-browser, using fallback"
+            );
+        } else {
+            state.api_status = format!(
+                "web mode: proxy `{proxy_base}` configured; browser Neocortex transport not enabled in this build, using fallback"
+            );
+        }
         state.last_audio_path.clear();
         state.pending_audio_path = None;
         finalize_commentary_line(
@@ -942,34 +975,71 @@ fn process_commentary_queue(
         return;
     }
 
-    let api_base_url =
-        std::env::var(API_BASE_URL_ENV).unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string());
-    let session_id = state.session_id_by_commentator.get(&profile.id).cloned();
-    let output_path = next_audio_output_path(DEFAULT_AUDIO_FORMAT, &profile.id);
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(api_key) = std::env::var(API_KEY_ENV)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+        else {
+            state.api_status = format!("{API_KEY_ENV} not set, using fallback");
+            state.last_audio_path.clear();
+            state.pending_audio_path = None;
+            finalize_commentary_line(
+                &mut state,
+                &profile.id,
+                &speaker_name,
+                profile.subtitle_color,
+                fallback_line,
+                now,
+            );
+            return;
+        };
 
-    let args = NeocortexJobArgs {
-        api_base_url,
-        api_key,
-        character_id,
-        prompt,
-        voice_emotion,
-        session_id,
-        audio_format: DEFAULT_AUDIO_FORMAT.to_string(),
-        output_path,
-        max_retries: config.commentator.commentary.api_max_retries,
-        retry_backoff_seconds: config.commentator.commentary.api_retry_backoff_seconds,
-    };
+        let character_id = profile.character_id.trim().to_string();
+        if character_id.is_empty() {
+            state.api_status = "character_id missing, using fallback".to_string();
+            state.last_audio_path.clear();
+            state.pending_audio_path = None;
+            finalize_commentary_line(
+                &mut state,
+                &profile.id,
+                &speaker_name,
+                profile.subtitle_color,
+                fallback_line,
+                now,
+            );
+            return;
+        }
 
-    let worker = std::thread::spawn(move || run_neocortex_chat_to_voice(args));
-    state.inflight_request = Some(InFlightApiRequest {
-        speaker_id: profile.id.clone(),
-        speaker_name,
-        subtitle_color: profile.subtitle_color,
-        fallback_line,
-        started_at_seconds: now,
-        handle: worker,
-    });
-    state.api_status = "requesting chat+audio...".to_string();
+        let api_base_url =
+            std::env::var(API_BASE_URL_ENV).unwrap_or_else(|_| DEFAULT_API_BASE_URL.to_string());
+        let session_id = state.session_id_by_commentator.get(&profile.id).cloned();
+        let output_path = next_audio_output_path(DEFAULT_AUDIO_FORMAT, &profile.id);
+
+        let args = NeocortexJobArgs {
+            api_base_url,
+            api_key,
+            character_id,
+            prompt,
+            voice_emotion,
+            session_id,
+            audio_format: DEFAULT_AUDIO_FORMAT.to_string(),
+            output_path,
+            max_retries: config.commentator.commentary.api_max_retries,
+            retry_backoff_seconds: config.commentator.commentary.api_retry_backoff_seconds,
+        };
+
+        let worker = std::thread::spawn(move || run_neocortex_chat_to_voice(args));
+        state.inflight_request = Some(InFlightApiRequest {
+            speaker_id: profile.id.clone(),
+            speaker_name,
+            subtitle_color: profile.subtitle_color,
+            fallback_line,
+            started_at_seconds: now,
+            handle: worker,
+        });
+        state.api_status = "requesting chat+audio...".to_string();
+    }
 }
 fn sync_commentary_subtitle_overlay(
     time: Res<Time>,
@@ -1352,6 +1422,7 @@ fn count_visible_enemies_on_screen(
     Some(visible_count)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn next_audio_output_path(extension: &str, speaker_id: &str) -> PathBuf {
     let timestamp_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1371,6 +1442,7 @@ fn next_audio_output_path(extension: &str, speaker_id: &str) -> PathBuf {
         "out/commentary/{timestamp_ms}-{safe_speaker}.{extension}"
     ))
 }
+#[cfg(not(target_arch = "wasm32"))]
 fn run_neocortex_chat_to_voice(args: NeocortexJobArgs) -> Result<NeocortexJobResult, String> {
     let total_attempts = args.max_retries.saturating_add(1).max(1);
     let mut delay_seconds = args.retry_backoff_seconds.max(0.0) as f64;
@@ -1407,6 +1479,7 @@ fn run_neocortex_chat_to_voice(args: NeocortexJobArgs) -> Result<NeocortexJobRes
     ))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_neocortex_chat_to_voice_once(args: &NeocortexJobArgs) -> Result<NeocortexJobResult, String> {
     let chat_url = format!("{}/api/v2/chat", args.api_base_url.trim_end_matches('/'));
     let audio_url = format!(
@@ -1491,6 +1564,7 @@ fn run_neocortex_chat_to_voice_once(args: &NeocortexJobArgs) -> Result<Neocortex
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_curl_json_post(
     url: &str,
     payload_json: &str,
@@ -1529,6 +1603,7 @@ fn run_curl_json_post(
     Ok((status_code, body.trim().to_string()))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_curl_download_post(
     url: &str,
     payload_json: &str,
@@ -1565,6 +1640,7 @@ fn run_curl_download_post(
         .map_err(|e| format!("failed to parse audio status code: {e}"))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn run_curl_capture_stdout(args: &[String]) -> Result<String, String> {
     let run = |binary: &str| Command::new(binary).args(args).output();
     let output = match run("curl.exe") {
@@ -1618,11 +1694,17 @@ fn truncate(input: &str, max_chars: usize) -> String {
     truncated
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unix_timestamp_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unix_timestamp_seconds() -> u64 {
+    0
 }
 
 #[derive(Debug, Serialize)]

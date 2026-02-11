@@ -1,14 +1,14 @@
 [[sprites]]
 id = "vehicle_starter_car_sprite"
-path = "sprites/vehicle_starter_car.png"
+path = "sprites/autoauto_logo.jpg"
 
 [[sprites]]
 id = "enemy_grunt_sprite"
-path = "sprites/enemy_grunt.png"
+path = "sprites/autoauto_logo.jpg"
 
 [[sprites]]
 id = "turret_base_sprite"
-path = "sprites/turret_base.png"
+path = "sprites/autoauto_logo.jpg"
 
 [[models]]
 id = "vehicle_starter_car"
@@ -24,9 +24,9 @@ turret_node = "geometry_0.002.root.1"
 
 [[models]]
 id = "enemy_grunt_model"
-scene_path = "models/enemies/grunt.glb#Scene0"
-root_node = "GruntRoot"
-wheel_nodes = ["WheelDummy"]
+scene_path = "models/enemies/beetle_rough.glb#Scene0"
+root_node = "ROOT"
+wheel_nodes = ["ROOT"]
 
 [[models]]
 id = "enemy_roadside_turret"
@@ -86,15 +86,15 @@ path = "splats/cemetery.ply"
 
 [[audio]]
 id = "sfx_player_shot"
-path = "audio/sfx/player_shot.ogg"
+path = "audio/sfx/gun_shot.wav"
 
 [[audio]]
 id = "sfx_enemy_shot"
-path = "audio/sfx/enemy_shot.ogg"
+path = "audio/sfx/missile_launch.wav"
 
 [[audio]]
 id = "sfx_hit"
-path = "audio/sfx/hit.ogg"
+path = "audio/sfx/gun_hit.wav"
 
 [[audio]]
 id = "sfx_engine_loop"

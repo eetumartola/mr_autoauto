@@ -609,10 +609,20 @@ fn cleanup_results_screen(
 
 fn results_controls(
     keyboard: Res<ButtonInput<KeyCode>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    config: Option<Res<GameConfig>>,
     mut next_state: ResMut<NextState<GameState>>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    if keyboard.just_pressed(KeyCode::Space) {
+    let web_tap_restart = config
+        .as_ref()
+        .map(|config| config.is_web_mode_active())
+        .unwrap_or(false)
+        && (mouse_buttons.just_pressed(MouseButton::Left)
+            || touches.iter_just_pressed().next().is_some());
+
+    if keyboard.just_pressed(KeyCode::Space) || web_tap_restart {
         next_state.set(GameState::Boot);
     }
 

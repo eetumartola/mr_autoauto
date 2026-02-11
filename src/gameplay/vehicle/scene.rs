@@ -312,7 +312,10 @@ pub(super) fn spawn_vehicle_scene(
     }
 
     if existing_background.is_empty() {
-        let spawned_splat_background = {
+        let splats_disabled = should_disable_splats_for_platform(&config);
+        let spawned_splat_background = if splats_disabled {
+            false
+        } else {
             #[cfg(feature = "gaussian_splats")]
             {
                 spawn_gaussian_splat_background(&mut commands, &config, &asset_server)

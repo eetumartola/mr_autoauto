@@ -263,6 +263,13 @@ impl AudioAssetEntry {
 }
 
 fn asset_exists(asset_root: &Path, path: &str) -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = asset_root;
+        let _ = path;
+        return true;
+    }
+
     let file_path = path.split('#').next().unwrap_or(path);
     asset_root.join(file_path).exists()
 }

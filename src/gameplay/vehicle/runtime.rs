@@ -168,10 +168,22 @@ pub(super) fn update_stunt_metrics(
 pub(super) fn read_vehicle_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     bindings: Res<VehicleInputBindings>,
+    virtual_controls: Option<Res<VirtualControlState>>,
     mut input_state: ResMut<VehicleInputState>,
 ) {
-    input_state.accelerate = bindings.accelerate.iter().any(|key| keyboard.pressed(*key));
-    input_state.brake = bindings.brake.iter().any(|key| keyboard.pressed(*key));
+    let accelerate_keyboard = bindings.accelerate.iter().any(|key| keyboard.pressed(*key));
+    let brake_keyboard = bindings.brake.iter().any(|key| keyboard.pressed(*key));
+    let accelerate_virtual = virtual_controls
+        .as_ref()
+        .map(|state| state.accelerate)
+        .unwrap_or(false);
+    let brake_virtual = virtual_controls
+        .as_ref()
+        .map(|state| state.brake)
+        .unwrap_or(false);
+
+    input_state.accelerate = accelerate_keyboard || accelerate_virtual;
+    input_state.brake = brake_keyboard || brake_virtual;
 }
 
 pub(super) fn sync_rapier_gravity_from_config(

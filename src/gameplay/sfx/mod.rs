@@ -6,13 +6,16 @@ use crate::gameplay::combat::{
 };
 use crate::gameplay::vehicle::{VehicleInputState, VehicleTelemetry};
 use crate::states::GameState;
+use crate::web::{audio_playback_allowed, AudioUnlockState};
 use bevy::audio::{
     AudioPlayer, AudioSink, AudioSinkPlayback, AudioSource, PlaybackSettings, Volume,
 };
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const AUDIO_ID_ENGINE_LOOP: &str = "sfx_engine_loop";
@@ -144,6 +147,7 @@ fn clear_sfx_audio_cache(mut cache: ResMut<SfxRuntimeAudioCache>) {
 fn ensure_background_music_audio(
     mut commands: Commands,
     config: Res<GameConfig>,
+    audio_unlock: Option<Res<AudioUnlockState>>,
     registry: Option<Res<AssetRegistry>>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
     mut runtime_audio_cache: ResMut<SfxRuntimeAudioCache>,
@@ -159,7 +163,7 @@ fn ensure_background_music_audio(
         return;
     }
 
-    if !config.game.sfx.enabled {
+    if !config.game.sfx.enabled || !audio_playback_allowed(&config, audio_unlock.as_deref()) {
         for entity in &existing_query {
             commands.entity(entity).try_despawn();
         }
@@ -232,13 +236,14 @@ fn cleanup_sfx_entities(
 fn ensure_engine_loop_audio(
     mut commands: Commands,
     config: Res<GameConfig>,
+    audio_unlock: Option<Res<AudioUnlockState>>,
     registry: Option<Res<AssetRegistry>>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
     mut runtime_audio_cache: ResMut<SfxRuntimeAudioCache>,
     mut warnings: ResMut<SfxMissingAssetWarnings>,
     existing_query: Query<Entity, With<EngineLoopAudio>>,
 ) {
-    if !config.game.sfx.enabled {
+    if !config.game.sfx.enabled || !audio_playback_allowed(&config, audio_unlock.as_deref()) {
         for entity in &existing_query {
             commands.entity(entity).try_despawn();
         }
@@ -337,6 +342,7 @@ fn update_engine_loop_audio(
 fn play_gameplay_sfx(
     mut commands: Commands,
     config: Res<GameConfig>,
+    audio_unlock: Option<Res<AudioUnlockState>>,
     registry: Option<Res<AssetRegistry>>,
     mut audio_sources: ResMut<Assets<AudioSource>>,
     mut runtime_audio_cache: ResMut<SfxRuntimeAudioCache>,
@@ -346,7 +352,7 @@ fn play_gameplay_sfx(
     mut impact_events: MessageReader<PlayerProjectileImpactEvent>,
     mut killed_events: MessageReader<EnemyKilledEvent>,
 ) {
-    if !config.game.sfx.enabled {
+    if !config.game.sfx.enabled || !audio_playback_allowed(&config, audio_unlock.as_deref()) {
         let _ = fired_events.read().count();
         let _ = impact_events.read().count();
         let _ = killed_events.read().count();
@@ -511,23 +517,71 @@ fn resolve_runtime_audio_handle(
         }
         return None;
     };
-    if !entry.exists_on_disk {
-        if warnings.missing_ids.insert(audio_id.to_string()) {
-            warn!(
-                "SFX audio asset `{}` path `{}` does not exist on disk.",
-                audio_id, entry.path
-            );
-        }
-        return None;
-    }
 
-    let audio_file_path = resolve_asset_file_path(&entry.path);
-    let mut bytes = match fs::read(&audio_file_path) {
-        Ok(bytes) => bytes,
-        Err(error) => {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let Some(raw_bytes) = embedded_wasm_audio_bytes(audio_id) else {
             if warnings.missing_ids.insert(audio_id.to_string()) {
                 warn!(
-                    "Failed reading SFX asset `{}` from `{}`: {}",
+                    "SFX audio asset `{}` has no embedded wasm audio payload; skipping.",
+                    audio_id
+                );
+            }
+            return None;
+        };
+
+        let mut bytes = raw_bytes.to_vec();
+        if let Err(error) = sanitize_runtime_audio_bytes(&mut bytes) {
+            if warnings.missing_ids.insert(audio_id.to_string()) {
+                warn!(
+                    "Skipping wasm SFX asset `{}` path `{}`: {}",
+                    audio_id, entry.path, error
+                );
+            }
+            return None;
+        }
+
+        let handle = audio_sources.add(AudioSource {
+            bytes: bytes.into(),
+        });
+        runtime_audio_cache
+            .handles_by_id
+            .insert(audio_id.to_string(), handle.clone());
+        return Some(handle);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if !entry.exists_on_disk {
+            if warnings.missing_ids.insert(audio_id.to_string()) {
+                warn!(
+                    "SFX audio asset `{}` path `{}` does not exist on disk.",
+                    audio_id, entry.path
+                );
+            }
+            return None;
+        }
+
+        let audio_file_path = resolve_asset_file_path(&entry.path);
+        let mut bytes = match fs::read(&audio_file_path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                if warnings.missing_ids.insert(audio_id.to_string()) {
+                    warn!(
+                        "Failed reading SFX asset `{}` from `{}`: {}",
+                        audio_id,
+                        audio_file_path.to_string_lossy(),
+                        error
+                    );
+                }
+                return None;
+            }
+        };
+
+        if let Err(error) = sanitize_runtime_audio_bytes(&mut bytes) {
+            if warnings.missing_ids.insert(audio_id.to_string()) {
+                warn!(
+                    "Skipping SFX asset `{}` from `{}`: {}",
                     audio_id,
                     audio_file_path.to_string_lossy(),
                     error
@@ -535,27 +589,15 @@ fn resolve_runtime_audio_handle(
             }
             return None;
         }
-    };
 
-    if let Err(error) = sanitize_runtime_audio_bytes(&mut bytes) {
-        if warnings.missing_ids.insert(audio_id.to_string()) {
-            warn!(
-                "Skipping SFX asset `{}` from `{}`: {}",
-                audio_id,
-                audio_file_path.to_string_lossy(),
-                error
-            );
-        }
-        return None;
+        let handle = audio_sources.add(AudioSource {
+            bytes: bytes.into(),
+        });
+        runtime_audio_cache
+            .handles_by_id
+            .insert(audio_id.to_string(), handle.clone());
+        Some(handle)
     }
-
-    let handle = audio_sources.add(AudioSource {
-        bytes: bytes.into(),
-    });
-    runtime_audio_cache
-        .handles_by_id
-        .insert(audio_id.to_string(), handle.clone());
-    Some(handle)
 }
 
 fn resolve_asset_file_path(asset_path: &str) -> PathBuf {
@@ -575,6 +617,23 @@ fn sanitize_runtime_audio_bytes(bytes: &mut [u8]) -> Result<(), String> {
     }
 
     Err("non-WAV payload not supported in SFX runtime loader".to_string())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn embedded_wasm_audio_bytes(audio_id: &str) -> Option<&'static [u8]> {
+    match audio_id {
+        AUDIO_ID_ENGINE_LOOP => Some(include_bytes!("../../../assets/audio/sfx/engine.wav")),
+        AUDIO_ID_EXPLODE => Some(include_bytes!("../../../assets/audio/sfx/explode.wav")),
+        AUDIO_ID_GUN_HIT => Some(include_bytes!("../../../assets/audio/sfx/gun_hit.wav")),
+        AUDIO_ID_GUN_MISS => Some(include_bytes!("../../../assets/audio/sfx/gun_miss.wav")),
+        AUDIO_ID_GUN_SHOT => Some(include_bytes!("../../../assets/audio/sfx/gun_shot.wav")),
+        AUDIO_ID_MISSILE_HIT => Some(include_bytes!("../../../assets/audio/sfx/missile_hit.wav")),
+        AUDIO_ID_MISSILE_LAUNCH => Some(include_bytes!(
+            "../../../assets/audio/sfx/missile_launch.wav"
+        )),
+        AUDIO_ID_MUSIC_LOOP => Some(include_bytes!("../../../assets/audio/music.wav")),
+        _ => None,
+    }
 }
 
 fn normalize_wav_unknown_sizes(bytes: &mut [u8]) -> Result<(), String> {
@@ -664,7 +723,10 @@ fn normalize_wav_linear_pcm_header_fields(bytes: &mut [u8]) -> Result<(), String
             let audio_format =
                 u16::from_le_bytes([bytes[chunk_data_start], bytes[chunk_data_start + 1]]);
             if audio_format != 1 {
-                return Ok(());
+                return Err(format!(
+                    "unsupported wav fmt audio_format={} (only PCM=1 supported)",
+                    audio_format
+                ));
             }
 
             let channels =
@@ -733,11 +795,17 @@ fn next_signed_unit_random(seed: &mut u64) -> f32 {
     (next_unit_random(seed) * 2.0) - 1.0
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unix_timestamp_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unix_timestamp_seconds() -> u64 {
+    0
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

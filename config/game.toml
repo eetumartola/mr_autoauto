@@ -4,6 +4,17 @@ default_vehicle = "starter_car"
 fixed_timestep_hz = 60.0
 starting_environment = "normal"
 
+[web]
+enabled = false
+show_touch_controls = true
+require_audio_tap = true
+disable_splats = false
+max_player_projectiles = 96
+max_enemy_projectiles = 72
+reduce_fx = true
+neocortex_proxy_base_url = ""
+allow_client_api_key = false
+
 [pickups]
 bounce_damping = 0.28
 coin_jitter_x_m = 0.24

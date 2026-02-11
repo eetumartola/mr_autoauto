@@ -1,3 +1,7 @@
 /target
 Cargo.lock
 out/
+mr_autoauto.exe
+mr_autoauto.zip
+web/dist/
+.trunk/

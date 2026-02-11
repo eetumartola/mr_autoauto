@@ -33,6 +33,23 @@ If you want to run without that feature:
 cargo run --release --no-default-features
 ```
 
+## Web Build
+
+Build and serve scripts are included:
+
+```powershell
+.\scripts\build_web.ps1
+.\scripts\serve_web.ps1
+```
+
+Notes:
+- Web build scripts use default features, including Gaussian splat support.
+- Browser audio is gated until first user gesture; tap/click/keypress unlocks audio.
+- Touch controls are enabled via `config/game.toml` `[web]` settings.
+- Neocortex API calls are intentionally fallback-only in browser builds unless you add a secure proxy flow.
+- For static hosting, publish the entire `web/dist/` directory (including `assets/` and `config/`).
+- Configure your web server to serve `.wasm` files as `application/wasm` to avoid slower fallback loading.
+
 ## Controls
 
 - `D` / `Right`: accelerate (or choose right upgrade card)
@@ -54,7 +71,7 @@ cargo run --release --no-default-features
 ## Configuration
 
 Main tuning lives in `config/*.toml`:
-- `config/game.toml`: app flags, terrain waves, scoring, SFX mix, run upgrade pool
+- `config/game.toml`: app flags, terrain waves, scoring, SFX mix, run upgrade pool, and web/touch/perf knobs
 - `config/vehicles.toml`: vehicle physics, traction/suspension, health, targeting
 - `config/weapons.toml`: projectile and weapon tuning
 - `config/enemy_types.toml` + `config/spawners.toml`: enemy stats and spawn rules

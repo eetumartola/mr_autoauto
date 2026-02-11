@@ -433,16 +433,27 @@ environment = "ice"
 **Goal:** deliver WASM build with acceptable performance.
 
 **Tasks**
-- [not started] I1. Web-compatible asset loading paths.
-- [not started] I2. Touch input UI and pointer capture.
-- [not started] I3. Audio autoplay policy handling:
-  - require first user tap to enable audio; show prompt.
-- [not started] I4. Networking constraints:
-  - CORS setup for Neocortex endpoint; API key injection strategy.
-- [not started] I5. Performance knobs:
-  - cap projectiles; lower splat detail; reduce FX.
-- [not started] I6. Build pipeline:
-  - `wasm32-unknown-unknown` + bundling + simple hosting script.
+- [done] I1. Web-compatible asset loading paths.
+  - wasm now loads embedded TOML config snapshots instead of filesystem reads.
+  - asset registry no longer hard-blocks web loads on local disk existence checks.
+  - runtime SFX handle path on web now uses `AssetServer` handles directly.
+- [done] I2. Touch input UI and pointer capture.
+  - added bottom-screen touch lanes (brake/accel) with hold + fresh-press signals.
+  - pointer/touch handling now captures left/right half-screen input and enables cursor confinement while active.
+- [done] I3. Audio autoplay policy handling:
+  - added first-gesture audio unlock gate + on-screen prompt in `InRun`.
+  - gameplay SFX/music/commentary audio playback now respects unlock state.
+- [done] I4. Networking constraints:
+  - web commentary path now enforces safe fallback subtitles by default.
+  - added `game.toml::web.neocortex_proxy_base_url` + `allow_client_api_key` strategy knobs for explicit proxy-based integration planning (no in-browser secret exposure by default).
+- [done] I5. Performance knobs:
+  - added web knobs in `game.toml::web` for player/enemy projectile caps, splat disable toggle, and reduced FX toggle.
+  - web-mode projectile caps are enforced in player and enemy firing systems.
+  - web-mode reduced FX can skip heavy particle spawning.
+- [done] I6. Build pipeline:
+  - added root `index.html` (Trunk entry, canvas wiring, asset/config copy directives).
+  - added `Trunk.toml` to keep web output under `web/dist`.
+  - added `scripts/build_web.ps1` and `scripts/serve_web.ps1` for `wasm32` build/serve flow with strict non-zero exit handling.
 
 **DoD**
 - The web build runs, controls work, narration works after user gesture, and framerate is "demoable."
@@ -552,6 +563,20 @@ environment = "ice"
   - gameplay SFX now uses data-driven mix values under `game.toml::sfx` (master, per-sound relative volume, pitch random range, engine loop response/jitter).
   - WAV-only audio pipeline for runtime playback: removed Bevy `mp3` decoding feature and now reject non-WAV Neocortex narration payloads to avoid demuxer false-positive crashes.
   - SFX runtime loader now reads WAV bytes directly and normalizes malformed PCM `fmt` header fields (e.g., incorrect mono `byte_rate`) before playback to prevent Bevy decode panics.
+  - web SFX/music playback now uses embedded WAV bytes with pre-playback validation/sanitization (instead of raw AssetServer handles) to avoid browser-hosted malformed-audio panic paths.
+- Web runtime note:
+  - web builds now use embedded config snapshots, touch controls, and first-gesture audio unlock.
+  - web performance profile is data-driven in `game.toml::web` (projectile caps, splat disable, reduced FX).
+  - web Neocortex path is intentionally fallback-first unless a secure proxy strategy is provided.
+  - Trunk pipeline is rooted at repo `index.html` (not `web/index.html`) so Cargo metadata resolves from the project root while still emitting to `web/dist`.
+  - web deployment requires publishing the full `web/dist` output tree and serving `.wasm` with `application/wasm`.
+  - disabled Bevy asset `.meta` probing via `AssetMetaCheck::Never` to reduce browser 404 noise on static hosts.
+  - web scripts now build with `--no-default-features` by default, disabling Gaussian splats for web stability (the current splat pipeline needs vertex-storage support that is not reliable across browser adapters).
+  - default web config keeps `disable_splats` available as a runtime knob, but web release builds currently compile without splat support.
+  - wasm builds enable Bevy `webgpu`; this helps capable adapters, but it does not guarantee required vertex-storage limits for the current splat plugin path.
+  - web build/serve scripts now pass `--minify false` to bypass local `wasm-opt` copy failures while keeping reliable release wasm output.
+- Ground coverage note:
+  - spline-strip ground generation now scales its horizontal span from configured segment lengths (plus margins), so boss spawn points near long-segment ends remain on valid terrain.
 
 ---
 

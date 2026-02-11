@@ -21,12 +21,17 @@ impl Plugin for ConfigPlugin {
 }
 
 fn load_game_config(mut commands: Commands) {
-    let config = GameConfig::load_from_dir(Path::new(CONFIG_DIR)).unwrap_or_else(|error| {
-        panic!("failed to load configuration from `{CONFIG_DIR}`: {error}");
-    });
+    let config =
+        GameConfig::load_for_current_platform(Path::new(CONFIG_DIR)).unwrap_or_else(|error| {
+            panic!("failed to load configuration from `{CONFIG_DIR}`: {error}");
+        });
 
     log_config_summary("Loaded", &config);
-    info!("Press F5 to hot-reload config files from `{CONFIG_DIR}`.");
+    if cfg!(target_arch = "wasm32") {
+        info!("Config hot-reload is disabled on web builds (embedded config snapshot).");
+    } else {
+        info!("Press F5 to hot-reload config files from `{CONFIG_DIR}`.");
+    }
 
     commands.insert_resource(config);
 }
@@ -44,7 +49,14 @@ fn reload_game_config_hotkey(
         return;
     };
 
-    match GameConfig::load_from_dir(Path::new(CONFIG_DIR)) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        warn!("Config hot-reload is not available on wasm builds.");
+        return;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    match GameConfig::load_for_current_platform(Path::new(CONFIG_DIR)) {
         Ok(new_config) => {
             *current_config = new_config;
             log_config_summary("Hot-reloaded", &current_config);
@@ -92,6 +104,19 @@ pub struct GameConfig {
 }
 
 impl GameConfig {
+    pub fn load_for_current_platform(config_dir: &Path) -> Result<Self, ConfigError> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = config_dir;
+            Self::load_embedded()
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self::load_from_dir(config_dir)
+        }
+    }
+
     pub fn load_from_dir(config_dir: &Path) -> Result<Self, ConfigError> {
         let game: GameFile = read_toml(&config_dir.join("game.toml"))?;
         let assets: AssetsFile = read_toml(&config_dir.join("assets.toml"))?;
@@ -137,6 +162,94 @@ impl GameConfig {
         Ok(config)
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn load_embedded() -> Result<Self, ConfigError> {
+        let game: GameFile =
+            read_toml_from_str("config/game.toml", include_str!("../../config/game.toml"))?;
+        let assets: AssetsFile = read_toml_from_str(
+            "config/assets.toml",
+            include_str!("../../config/assets.toml"),
+        )?;
+        let segments: SegmentsFile = read_toml_from_str(
+            "config/segments.toml",
+            include_str!("../../config/segments.toml"),
+        )?;
+        let backgrounds: BackgroundsFile = read_toml_from_str(
+            "config/backgrounds.toml",
+            include_str!("../../config/backgrounds.toml"),
+        )?;
+        let environments: EnvironmentsFile = read_toml_from_str(
+            "config/environments.toml",
+            include_str!("../../config/environments.toml"),
+        )?;
+        let enemy_types: EnemyTypesFile = read_toml_from_str(
+            "config/enemy_types.toml",
+            include_str!("../../config/enemy_types.toml"),
+        )?;
+        let spawners: SpawnersFile = read_toml_from_str(
+            "config/spawners.toml",
+            include_str!("../../config/spawners.toml"),
+        )?;
+        let weapons: WeaponsFile = read_toml_from_str(
+            "config/weapons.toml",
+            include_str!("../../config/weapons.toml"),
+        )?;
+        let vehicles: VehiclesFile = read_toml_from_str(
+            "config/vehicles.toml",
+            include_str!("../../config/vehicles.toml"),
+        )?;
+        let upgrades: UpgradesFile = read_toml_from_str(
+            "config/upgrades.toml",
+            include_str!("../../config/upgrades.toml"),
+        )?;
+        let commentator: CommentatorFile = read_toml_from_str(
+            "config/commentator.toml",
+            include_str!("../../config/commentator.toml"),
+        )?;
+
+        let config = Self {
+            sprite_assets_by_id: to_index("assets.toml::sprites", &assets.sprites)?,
+            model_assets_by_id: to_index("assets.toml::models", &assets.models)?,
+            splat_assets_by_id: to_index("assets.toml::splats", &assets.splats)?,
+            audio_assets_by_id: to_index("assets.toml::audio", &assets.audio)?,
+            backgrounds_by_id: to_index("backgrounds.toml::backgrounds", &backgrounds.backgrounds)?,
+            environments_by_id: to_index(
+                "environments.toml::environments",
+                &environments.environments,
+            )?,
+            enemy_types_by_id: to_index("enemy_types.toml::enemy_types", &enemy_types.enemy_types)?,
+            spawners_by_id: to_index("spawners.toml::spawners", &spawners.spawners)?,
+            weapons_by_id: to_index("weapons.toml::weapons", &weapons.weapons)?,
+            vehicles_by_id: to_index("vehicles.toml::vehicles", &vehicles.vehicles)?,
+            upgrades_by_id: to_index("upgrades.toml::upgrades", &upgrades.upgrades)?,
+            game,
+            assets,
+            segments,
+            backgrounds,
+            environments,
+            enemy_types,
+            spawners,
+            weapons,
+            vehicles,
+            upgrades,
+            commentator,
+        };
+
+        config.validate_references()?;
+        Ok(config)
+    }
+
+    pub fn is_web_mode_active(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            true
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.game.web.enabled
+        }
+    }
+
     fn validate_references(&self) -> Result<(), ConfigError> {
         if !self
             .environments_by_id
@@ -156,6 +269,27 @@ impl GameConfig {
                 "game.toml::app.default_vehicle references unknown vehicle id `{}`",
                 self.game.app.default_vehicle
             )));
+        }
+
+        if self.game.web.max_player_projectiles == 0 {
+            return Err(ConfigError::Validation(
+                "game.toml::web.max_player_projectiles must be >= 1".to_string(),
+            ));
+        }
+        if self.game.web.max_enemy_projectiles == 0 {
+            return Err(ConfigError::Validation(
+                "game.toml::web.max_enemy_projectiles must be >= 1".to_string(),
+            ));
+        }
+        let proxy_base = self.game.web.neocortex_proxy_base_url.trim();
+        if !(proxy_base.is_empty()
+            || proxy_base.starts_with("http://")
+            || proxy_base.starts_with("https://")
+            || proxy_base.starts_with('/'))
+        {
+            return Err(ConfigError::Validation(
+                "game.toml::web.neocortex_proxy_base_url must start with `http://`, `https://`, or `/` when provided".to_string(),
+            ));
         }
 
         for (index, segment) in self.segments.segment_sequence.iter().enumerate() {
@@ -1155,8 +1289,12 @@ fn read_toml<T: DeserializeOwned>(path: &Path) -> Result<T, ConfigError> {
         path: path.to_path_buf(),
         source,
     })?;
-    toml::from_str(&raw).map_err(|source| ConfigError::Parse {
-        path: path.to_path_buf(),
+    read_toml_from_str(&path.to_string_lossy(), &raw)
+}
+
+fn read_toml_from_str<T: DeserializeOwned>(path_label: &str, raw: &str) -> Result<T, ConfigError> {
+    toml::from_str(raw).map_err(|source| ConfigError::Parse {
+        path: PathBuf::from(path_label),
         source: Box::new(source),
     })
 }
@@ -1201,6 +1339,8 @@ pub struct GameFile {
     pub run_upgrades: RunUpgradeConfig,
     #[serde(default)]
     pub sfx: SfxConfig,
+    #[serde(default)]
+    pub web: WebConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1209,6 +1349,80 @@ pub struct AppConfig {
     pub starting_environment: String,
     pub default_vehicle: String,
     pub debug_overlay: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WebConfig {
+    #[serde(default = "default_web_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_web_show_touch_controls")]
+    pub show_touch_controls: bool,
+    #[serde(default = "default_web_require_audio_tap")]
+    pub require_audio_tap: bool,
+    #[serde(default = "default_web_disable_splats")]
+    pub disable_splats: bool,
+    #[serde(default = "default_web_max_player_projectiles")]
+    pub max_player_projectiles: usize,
+    #[serde(default = "default_web_max_enemy_projectiles")]
+    pub max_enemy_projectiles: usize,
+    #[serde(default = "default_web_reduce_fx")]
+    pub reduce_fx: bool,
+    #[serde(default = "default_web_neocortex_proxy_base_url")]
+    pub neocortex_proxy_base_url: String,
+    #[serde(default = "default_web_allow_client_api_key")]
+    pub allow_client_api_key: bool,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_web_enabled(),
+            show_touch_controls: default_web_show_touch_controls(),
+            require_audio_tap: default_web_require_audio_tap(),
+            disable_splats: default_web_disable_splats(),
+            max_player_projectiles: default_web_max_player_projectiles(),
+            max_enemy_projectiles: default_web_max_enemy_projectiles(),
+            reduce_fx: default_web_reduce_fx(),
+            neocortex_proxy_base_url: default_web_neocortex_proxy_base_url(),
+            allow_client_api_key: default_web_allow_client_api_key(),
+        }
+    }
+}
+
+fn default_web_enabled() -> bool {
+    false
+}
+
+fn default_web_show_touch_controls() -> bool {
+    true
+}
+
+fn default_web_require_audio_tap() -> bool {
+    true
+}
+
+fn default_web_disable_splats() -> bool {
+    false
+}
+
+fn default_web_max_player_projectiles() -> usize {
+    96
+}
+
+fn default_web_max_enemy_projectiles() -> usize {
+    72
+}
+
+fn default_web_reduce_fx() -> bool {
+    true
+}
+
+fn default_web_neocortex_proxy_base_url() -> String {
+    String::new()
+}
+
+fn default_web_allow_client_api_key() -> bool {
+    false
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2344,6 +2558,7 @@ mod tests {
                 pickups: PickupConfig::default(),
                 run_upgrades: RunUpgradeConfig::default(),
                 sfx: SfxConfig::default(),
+                web: WebConfig::default(),
             },
             assets: AssetsFile::default(),
             segments: SegmentsFile {

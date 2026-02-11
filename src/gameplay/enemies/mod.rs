@@ -4,6 +4,7 @@ use crate::debug::{DebugGameplayGuards, EnemyDebugMarker};
 use crate::gameplay::combat::EnemyKilledEvent;
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
+use crate::web::max_enemy_projectiles_for_platform;
 use bevy::asset::LoadState;
 use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
@@ -1076,6 +1077,7 @@ fn fire_enemy_projectiles(
     time: Res<Time>,
     config: Res<GameConfig>,
     player_query: Query<&Transform, With<PlayerVehicle>>,
+    projectile_query: Query<(), With<EnemyProjectile>>,
     mut enemy_query: Query<
         (
             &Transform,
@@ -1092,6 +1094,8 @@ fn fire_enemy_projectiles(
     };
     let player_position = player_transform.translation.truncate();
     let dt = time.delta_secs();
+    let max_projectiles = max_enemy_projectiles_for_platform(&config);
+    let mut live_projectile_count = projectile_query.iter().count();
 
     for (enemy_transform, behavior, enemy_type_id, hitbox, mut attack_state) in &mut enemy_query {
         attack_state.cooldown_s -= dt;
@@ -1126,6 +1130,11 @@ fn fire_enemy_projectiles(
                 continue;
             }
 
+            if live_projectile_count >= max_projectiles {
+                attack_state.cooldown_s = fire_cooldown_s;
+                continue;
+            }
+
             let bomb_spawn_world = enemy_position + Vec2::new(0.0, -(hitbox.radius_m + 0.2));
             spawn_enemy_projectile(
                 &mut commands,
@@ -1134,6 +1143,7 @@ fn fire_enemy_projectiles(
                 bomb_spawn_world,
                 Vec2::NEG_Y,
             );
+            live_projectile_count = live_projectile_count.saturating_add(1);
             attack_state.cooldown_s = fire_cooldown_s;
             continue;
         }
@@ -1155,6 +1165,9 @@ fn fire_enemy_projectiles(
 
         for _ in 0..burst_count {
             for pattern_offset in pattern_offsets_rad.iter().take(pattern_count) {
+                if live_projectile_count >= max_projectiles {
+                    break;
+                }
                 let behavior_offset = if behavior.kind == EnemyBehaviorKind::Flier {
                     pattern_offset * aim_direction.x.signum().clamp(-1.0, 1.0)
                 } else {
@@ -1178,6 +1191,10 @@ fn fire_enemy_projectiles(
                     muzzle_world,
                     shot_direction_world,
                 );
+                live_projectile_count = live_projectile_count.saturating_add(1);
+            }
+            if live_projectile_count >= max_projectiles {
+                break;
             }
         }
 

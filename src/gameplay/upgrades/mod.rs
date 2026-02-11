@@ -2,9 +2,11 @@ use crate::config::{GameConfig, RunUpgradeEffectKind, RunUpgradeOptionConfig};
 use crate::gameplay::pickups::{PickupCollectedEvent, PickupKind};
 use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
+use crate::web::VirtualControlState;
 use bevy::prelude::*;
 use bevy::time::{Real, Virtual};
 use std::collections::HashMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_VISIBLE_UPGRADE_CHOICES: usize = 2;
@@ -289,6 +291,7 @@ fn sync_upgrade_pause_time(state: Res<UpgradeProgressState>, mut time: ResMut<Ti
 #[allow(clippy::too_many_arguments)]
 fn handle_upgrade_offer_input(
     keyboard: Res<ButtonInput<KeyCode>>,
+    virtual_controls: Option<Res<VirtualControlState>>,
     mut config: ResMut<GameConfig>,
     mut state: ResMut<UpgradeProgressState>,
     mut player_query: Query<&mut PlayerHealth, With<PlayerVehicle>>,
@@ -304,15 +307,18 @@ fn handle_upgrade_offer_input(
     };
 
     if state.wait_for_fresh_selection_input {
-        if selection_keys_held(&keyboard) {
+        if selection_keys_held(&keyboard, virtual_controls.as_deref()) {
             return;
         }
         state.wait_for_fresh_selection_input = false;
         return;
     }
 
-    let Some(selected_index) = selected_upgrade_index_from_input(&keyboard, offer.choices.len())
-    else {
+    let Some(selected_index) = selected_upgrade_index_from_input(
+        &keyboard,
+        virtual_controls.as_deref(),
+        offer.choices.len(),
+    ) else {
         return;
     };
     let Some(choice) = offer.choices.get(selected_index).cloned() else {
@@ -703,28 +709,44 @@ fn apply_upgrade_choice(
 
 fn selected_upgrade_index_from_input(
     keyboard: &ButtonInput<KeyCode>,
+    virtual_controls: Option<&VirtualControlState>,
     choice_count: usize,
 ) -> Option<usize> {
     if choice_count == 0 {
         return None;
     }
 
-    if keyboard.just_pressed(KeyCode::KeyA) || keyboard.just_pressed(KeyCode::ArrowLeft) {
+    if keyboard.just_pressed(KeyCode::KeyA)
+        || keyboard.just_pressed(KeyCode::ArrowLeft)
+        || virtual_controls
+            .map(|controls| controls.brake_just_pressed)
+            .unwrap_or(false)
+    {
         return Some(0);
     }
     if choice_count >= 2
-        && (keyboard.just_pressed(KeyCode::KeyD) || keyboard.just_pressed(KeyCode::ArrowRight))
+        && (keyboard.just_pressed(KeyCode::KeyD)
+            || keyboard.just_pressed(KeyCode::ArrowRight)
+            || virtual_controls
+                .map(|controls| controls.accelerate_just_pressed)
+                .unwrap_or(false))
     {
         return Some(1);
     }
     None
 }
 
-fn selection_keys_held(keyboard: &ButtonInput<KeyCode>) -> bool {
+fn selection_keys_held(
+    keyboard: &ButtonInput<KeyCode>,
+    virtual_controls: Option<&VirtualControlState>,
+) -> bool {
     keyboard.pressed(KeyCode::KeyA)
         || keyboard.pressed(KeyCode::ArrowLeft)
         || keyboard.pressed(KeyCode::KeyD)
         || keyboard.pressed(KeyCode::ArrowRight)
+        || virtual_controls
+            .map(|controls| controls.brake || controls.accelerate)
+            .unwrap_or(false)
 }
 
 fn describe_effect(effect: RunUpgradeEffectKind, value: f32) -> String {
@@ -751,9 +773,15 @@ fn describe_effect(effect: RunUpgradeEffectKind, value: f32) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unix_timestamp_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unix_timestamp_seconds() -> u64 {
+    0
 }

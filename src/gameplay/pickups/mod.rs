@@ -4,6 +4,7 @@ use crate::gameplay::vehicle::{PlayerHealth, PlayerVehicle};
 use crate::states::GameState;
 use bevy::math::primitives::RegularPolygon;
 use bevy::prelude::*;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const PICKUP_Z_M: f32 = 7.2;
@@ -329,11 +330,17 @@ fn terrain_height_at_x(config: &GameConfig, x: f32) -> f32 {
     config.terrain_height_at_x(x)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unix_timestamp_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn unix_timestamp_seconds() -> u64 {
+    0
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {

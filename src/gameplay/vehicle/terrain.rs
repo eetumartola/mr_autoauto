@@ -14,8 +14,17 @@ pub(super) struct GroundProfileSamples {
 }
 
 pub(super) fn build_ground_profile_samples(config: &GameConfig) -> GroundProfileSamples {
-    let segment_count = (GROUND_WIDTH / GROUND_SPLINE_SEGMENT_WIDTH_M).ceil() as usize + 2;
-    let start_x = -WORLD_HALF_WIDTH - GROUND_SPLINE_SEGMENT_WIDTH_M;
+    let configured_max_segment_length_m = config
+        .segments
+        .segment_sequence
+        .iter()
+        .map(|segment| segment.length.max(0.0))
+        .fold(0.0_f32, f32::max);
+    let forward_span_m = configured_max_segment_length_m.max(900.0) + 220.0;
+    let rear_span_m = 320.0;
+    let total_width_m = forward_span_m + rear_span_m;
+    let segment_count = (total_width_m / GROUND_SPLINE_SEGMENT_WIDTH_M).ceil() as usize + 2;
+    let start_x = -rear_span_m - GROUND_SPLINE_SEGMENT_WIDTH_M;
     let node_count = segment_count + 1;
 
     let mut top_points = Vec::with_capacity(node_count);
@@ -132,6 +141,12 @@ fn curtain_world_uv(world: Vec2) -> [f32; 2] {
 }
 
 pub(super) fn resolve_ground_texture_path(primary: &str, fallback: &str) -> String {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = fallback;
+        return primary.to_string();
+    }
+
     let primary_path = Path::new("assets").join(primary);
     if primary_path.exists() {
         return primary.to_string();
